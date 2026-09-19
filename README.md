@@ -79,7 +79,7 @@ python -m http.server 8765
 
 ## 🛠 技术说明
 
-- 纯静态单页应用：`index.html + app.js + style.css + data.js + d3.min.js`，零依赖、零构建
+- 纯静态单页应用：`index.html + app.js + style.css + data.js + d3.min.js`（图标 `favicon.ico` / `icon.png`），零依赖、零构建
 - `data.js`（约 7MB）为预计算的 JSON 数据：词表、关系边、词典、构词、搭配
 - 学习状态（掌握度）存于 localStorage，不上传任何数据
 - 建议使用 Chrome / Edge / Firefox 现代浏览器
