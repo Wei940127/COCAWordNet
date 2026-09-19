@@ -3,6 +3,18 @@
 "use strict";
 
 const D = window.APP_DATA;
+if (!D || !D.words || !D.words.length || window.__DATA_FAIL) {
+  /* data.js missing or corrupt — show a clear error instead of a dead page */
+  const ld = document.getElementById("loader");
+  if (ld) {
+    ld.classList.add("err");
+    const lt = document.getElementById("loaderText");
+    if (lt) lt.innerHTML = "词库 data.js 加载失败，应用无法启动。" +
+      "<small>请确认 data.js 与 index.html 在同一文件夹；" +
+      "若是在线访问，请刷新重试或检查网络。</small>";
+  }
+  return;
+}
 const N = D.words.length;
 
 /* ---------- relation meta ---------- */
@@ -656,6 +668,54 @@ $("mapModal").addEventListener("click", e => {
   if (e.target === $("mapModal")) $("mapModal").classList.add("hidden");
 });
 
+/* ---------- progress export / import ---------- */
+$("expBtn").onclick = () => {
+  const blob = new Blob(
+    [JSON.stringify({ app: "COCAWordNet", v: 1, exported: new Date().toISOString(), prog }, null, 1)],
+    { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "COCAWordNet-progress-" + new Date().toISOString().slice(0, 10) + ".json";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+};
+$("impBtn").onclick = () => {
+  const inp = document.createElement("input");
+  inp.type = "file";
+  inp.accept = ".json,application/json";
+  inp.onchange = () => {
+    const f = inp.files && inp.files[0];
+    if (!f) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      let obj = null;
+      try { obj = JSON.parse(String(rd.result)); } catch (e) { alert("文件不是有效的 JSON"); return; }
+      const p = (obj && typeof obj === "object") ? (obj.prog || obj) : null;
+      if (!p || typeof p !== "object") { alert("文件里没有进度数据"); return; }
+      const clean = {};
+      let skipped = 0;
+      for (const k in p) {
+        const v = p[k];
+        if (D.idx[k] !== undefined && v && (v.s === 1 || v.s === 2)) clean[k] = { s: v.s, t: v.t || Date.now() };
+        else skipped++;
+      }
+      const n = Object.keys(clean).length;
+      if (!n) { alert("没有找到有效的进度记录（需要是本应用导出的文件）"); return; }
+      const cur = Object.keys(prog).length;
+      if (!confirm("读到 " + n + " 条有效进度" + (skipped ? "（跳过 " + skipped + " 条无效）" : "") +
+        "。\n当前进度 " + cur + " 条，导入将覆盖现有进度。继续吗？")) return;
+      prog = clean;
+      saveProg();
+      renderStats();
+      renderMap();
+      if (current !== null) renderPanel(current);
+      draw();
+    };
+    rd.readAsText(f);
+  };
+  inp.click();
+};
+
 /* ---------- toolbar events ---------- */
 $("nextBtn").onclick = nextWord;
 $("focusBtn").onclick = focusCurrent;
@@ -676,6 +736,8 @@ document.addEventListener("keydown", e => {
 window.addEventListener("resize", () => { if (sim) { sim.force("center", d3.forceCenter(width() / 2, height() / 2)); sim.alpha(0.3).restart(); } });
 
 /* ---------- boot ---------- */
+const _loader = document.getElementById("loader");
+if (_loader) _loader.classList.add("done");
 renderStats();
 try {
   const last = localStorage.getItem("coca10000.last");

@@ -10,6 +10,11 @@
 </head>
 <body>
 
+<div id="loader" class="loader">
+  <div class="spinner"></div>
+  <div class="ltext" id="loaderText">词库加载中 · 约 7MB，首次打开稍慢…</div>
+</div>
+
 <header class="topbar">
   <div class="brand">
     <span class="logo"></span>
@@ -146,12 +151,18 @@
       <button id="mapClose" class="mclose" title="关闭">✕</button>
     </div>
     <div id="mapBody"></div>
-    <div class="mfoot">点击任意词层，直接跳到该层开始学习 · 绿=已掌握 · 琥珀=学习中 · 灰=未学</div>
+    <div class="mfoot">
+      <span>点击任意词层，直接跳到该层开始学习 · 绿=已掌握 · 琥珀=学习中 · 灰=未学</span>
+      <span class="mio">
+        <button id="expBtn" class="btn mini" title="把学习进度保存为 JSON 文件">⇩ 导出进度</button>
+        <button id="impBtn" class="btn mini" title="从 JSON 文件恢复学习进度">⇧ 导入进度</button>
+      </span>
+    </div>
   </div>
 </div>
 
 <script src="d3.min.js"></script>
-<script src="data.js"></script>
+<script src="data.js" onerror="window.__DATA_FAIL=1"></script>
 <script src="app.js"></script>
 </body>
 </html>
