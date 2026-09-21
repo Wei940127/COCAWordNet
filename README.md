@@ -26,19 +26,16 @@
 ## 🚀 快速开始
 
 ### 方式一：本地直接打开
-
 下载本仓库（`Code ▾` → `Download ZIP`），解压后**双击 `index.html`** 即可，无需安装任何东西。
 
 ### 方式二：部署到 GitHub Pages（推荐，手机也能用）
-
 1. Fork 或使用本仓库模板创建你自己的仓库
 2. 仓库页 → `Settings` → `Pages` → `Source` 选 `Deploy from a branch`，Branch 选 `main` / `(root)`，保存
-3. 一分钟后访问 `https://<你的用户名>.github.io/<仓库名>/`
+3. 一分钟后访问 `https://wei940127.github.io/COCAWordNet/`
 
 也可以用任何静态托管（Vercel / Netlify / Cloudflare Pages），直接导入仓库即可，无需构建。
 
 ### 本地起服务（可选）
-
 ```bash
 python -m http.server 8765
 # 打开 http://127.0.0.1:8765
