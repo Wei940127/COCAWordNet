@@ -187,7 +187,26 @@ main { flex: 1; display: flex; min-height: 0; }
   padding: 3px 9px; font-size: 12.5px; cursor: pointer; color: var(--text);
 }
 .rel .rlist button:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
-.rel .rlist button.ext { color: #94a3b8; font-style: italic; }
+.rel .rlist button.ext { color: #64748b; font-style: italic; border-style: dashed; }
+.rel .rlist button.ext:hover { color: var(--accent); border-style: solid; }
+.rel .rlist button.ext.on { border-style: solid; border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+
+/* ---- out-of-list (词表外) inline card ---- */
+.muted { color: #9ca3af; font-size: 12px; }
+.extlink { color: var(--accent); }
+.extinfo {
+  margin-top: 9px; padding: 9px 11px; border-radius: 8px;
+  border: 1px dashed var(--border); background: #f8fafc;
+}
+.extinfo .exth { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.extinfo .exth b { font-size: 15px; }
+.extinfo .exth .phon { font-size: 13px; }
+.extinfo .exttr { margin-top: 5px; font-size: 13px; line-height: 1.55; color: var(--text); }
+.mini-say {
+  border: 1px solid var(--border); background: #fff; border-radius: 6px;
+  padding: 2px 8px; font-size: 11.5px; cursor: pointer; color: var(--text);
+}
+.mini-say:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 
 /* ---- morphology & collocations ---- */
 .morph { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
@@ -234,6 +253,37 @@ main { flex: 1; display: flex; min-height: 0; }
 .mfoot { margin-top: 12px; font-size: 11.5px; color: #94a3b8; display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
 .mio { display: flex; gap: 6px; }
 .btn.mini { padding: 4px 10px; font-size: 11.5px; border-radius: 8px; }
+
+/* ---------- word list modal ---------- */
+.modalCard.wide { width: min(960px, 95vw); }
+.lbar { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+#listFilter {
+  flex: 1 1 200px; min-width: 160px; padding: 7px 11px; font-size: 13px;
+  border: 1px solid var(--border); border-radius: 8px; outline: none; color: var(--text);
+}
+#listFilter:focus { border-color: #93c5fd; box-shadow: 0 0 0 3px #dbeafe; }
+.lseg { display: flex; gap: 4px; background: #f1f5f9; padding: 3px; border-radius: 9px; }
+.lseg button {
+  border: none; background: transparent; cursor: pointer; font-size: 12.5px;
+  padding: 5px 11px; border-radius: 7px; color: #475569;
+}
+.lseg button:hover { background: #e2e8f0; }
+.lseg button.on { background: #fff; color: #1d4ed8; font-weight: 600; box-shadow: 0 1px 3px rgba(15,23,42,.12); }
+.lbody {
+  max-height: 62vh; overflow: auto;
+  display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start;
+  padding: 2px; border-top: 1px solid #eef2f7; padding-top: 12px;
+}
+.lw {
+  font-size: 13px; padding: 5px 10px; border-radius: 8px; cursor: pointer;
+  border: 1px solid transparent; transition: .1s; white-space: nowrap;
+}
+.lw:hover { border-color: #93c5fd; transform: translateY(-1px); }
+.lw.s0 { background: #f1f5f9; color: #475569; }
+.lw.s1 { background: #fef3c7; color: #92400e; }
+.lw.s2 { background: #dcfce7; color: #15803d; font-weight: 600; }
+.lw.on { outline: 2px solid #1d4ed8; outline-offset: 1px; }
+.lbody .lempty { color: #9ca3af; font-size: 13px; padding: 20px 4px; width: 100%; text-align: center; }
 
 /* ---------- boot loader ---------- */
 .loader {

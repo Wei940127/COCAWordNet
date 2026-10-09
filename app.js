@@ -220,11 +220,20 @@ function draw() {
       .on("end", (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null; }));
 
   enter.append("circle")
+    .attr("class", "vis")
     .attr("r", radius)
     .attr("fill", nodeFill)
     .attr("stroke", "#fff")
     .attr("stroke-width", 1.5)
-    .style("cursor", d => (d.kind === "w" ? "pointer" : "default"));
+    .style("pointer-events", "none");
+
+  /* transparent, larger hit area — makes the small out-of-list dots easy to click */
+  enter.append("circle")
+    .attr("class", "hit")
+    .attr("r", d => radius(d) + (d.kind === "x" ? 8 : 3))
+    .attr("fill", "transparent")
+    .style("cursor", "pointer")
+    .style("pointer-events", "all");
 
   enter.append("text")
     .attr("dy", d => radius(d) + 12)
@@ -235,11 +244,13 @@ function draw() {
     .attr("font-size", d => (d.kind === "x" ? 9 : d.id === "w:" + current ? 14 : 11));
 
   const all = enter.merge(nodeSel);
-  all.select("circle")
+  all.select("circle.vis")
     .attr("r", radius)
     .attr("fill", nodeFill)
     .attr("stroke", d => (d.id === "w:" + current ? "#1d4ed8" : "#fff"))
     .attr("stroke-width", d => (d.id === "w:" + current ? 3 : 1.5));
+  all.select("circle.hit")
+    .attr("r", d => radius(d) + (d.kind === "x" ? 8 : 3));
   all.select("text")
     .attr("dy", d => radius(d) + 12)
     .attr("font-size", d => (d.kind === "x" ? 9 : d.id === "w:" + current ? 14 : 11))
@@ -249,13 +260,23 @@ function draw() {
       e.stopPropagation();
       if (d.kind === "w") {
         if (d.i !== current) { trail.push(current); if (trail.length > 24) trail.shift(); expand(d.i); }
+        renderPanel(d.i);
+      } else {
+        /* out-of-list word: no network behind it — show what we know + play it */
+        renderPanel(null, d);
+        speak(d.word);
       }
-      renderPanel(d.kind === "w" ? d.i : null, d);
     })
     .on("dblclick", (e, d) => { e.stopPropagation(); if (d.kind === "w") expand(d.i, { reset: true }); })
-    .on("mouseenter", (e, d) => showTip(e, d))
+    .on("mouseenter", (e, d) => {
+      d3.select(e.currentTarget).select("circle.vis").attr("r", radius(d) + 3);
+      showTip(e, d);
+    })
     .on("mousemove", (e, d) => moveTip(e))
-    .on("mouseleave", hideTip);
+    .on("mouseleave", (e, d) => {
+      d3.select(e.currentTarget).select("circle.vis").attr("r", radius(d));
+      hideTip();
+    });
 
   linkSel = gLinks.selectAll("line").data(links, l => l.source.id + "|" + l.target.id + "|" + l.t);
   linkSel.exit().remove();
@@ -284,9 +305,12 @@ function showTip(e, d) {
     const tr = (D.trans[d.i] || "").split("；")[0];
     if (tr) html += "<br>" + tr.slice(0, 90);
   } else {
-    const tr = (D.extraTrans[d.i] || "").split("；")[0];
+    const ph = extraPhon(d.i);
+    const tr = (extraTrans(d.i) || "").split("；")[0];
     html += ' <span class="tp">词表外</span>';
+    if (ph) html += ' <span class="tp">/' + ph + "</span>";
     if (tr) html += "<br>" + tr.slice(0, 90);
+    html += '<br><span class="tp">点击听发音 · 查看释义</span>';
   }
   tooltip.innerHTML = html;
   tooltip.classList.remove("hidden");
@@ -343,19 +367,74 @@ function speak(word) {
     a.play().catch(() => { curAudio = null; done(); speakLocal(word); });
   } catch (e) { done(); speakLocal(word); }
 }
-function speakCurrent() { if (current !== null) speak(D.words[current]); }
+function speakCurrent() {
+  if (current !== null) speak(D.words[current]);
+  else if (extraCurrent !== null) speak(extraCurrent);
+}
 $("dSpeak").onclick = speakCurrent;
 $("dPhon").style.cursor = "pointer";
 $("dPhon").onclick = speakCurrent;
 
-function renderPanel(i, extraNode) {
-  if (i === null) {
-    $("detail").classList.add("hidden");
-    $("ph").classList.remove("hidden");
-    return;
-  }
+/* ---------- out-of-list related words ---------- */
+/* D.extraPhon / D.extraTrans are ARRAYS parallel to D.extra — index, not word key */
+let extraCurrent = null;
+function extraPhon(i) { return (D.extraPhon && D.extraPhon[i]) || ""; }
+function extraTrans(i) { return (D.extraTrans && D.extraTrans[i]) || ""; }
+
+function renderExtraPanel(node) {
+  const i = node.i, word = D.extra[i];
+  extraCurrent = word;
   $("ph").classList.add("hidden");
   $("detail").classList.remove("hidden");
+  $("dWord").textContent = word;
+  const ph = extraPhon(i);
+  $("dPhon").textContent = ph ? "/" + ph + "/" : "无音标 · 点 🔊 听发音";
+  $("dBand").textContent = "词表外关联词";
+  $("dTags").innerHTML = "";
+  document.querySelectorAll(".mbtn").forEach(b => b.classList.remove("on"));
+  $("masteryRow").style.display = "none";
+  $("dTrans").textContent = extraTrans(i) || "（暂无释义）";
+  $("dDef").style.display = "none";
+  $("dDef").textContent = "";
+  $("bMorph").style.display = "none";
+  $("bColl").style.display = "none";
+  $("dFamNote").textContent = "";
+  $("dFam").innerHTML = "<span class='muted'>词表外词汇，无词族数据</span>";
+  $("extInfo").classList.add("hidden");
+  $("dRel").innerHTML =
+    "<span class='muted'>该词不在 10000 词表内，所以没有可展开的关系网络。" +
+    "点 🔊（或直接点这个节点）可以听美式发音，上方是它的释义。" +
+    " 想看更多词形变化，可去 <a class='extlink' target='_blank' rel='noopener' href='https://dict.youdao.com/result?word=" +
+    encodeURIComponent(word) + "&lang=en'>在线词典 ↗</a></span>";
+}
+
+/* inline card used by the 关系词 list (.ext buttons) so you don't lose the current word */
+function showExtInfo(j) {
+  const el = $("extInfo");
+  if (!el) return;
+  const w = D.extra[j], ph = extraPhon(j), tr = extraTrans(j);
+  el.classList.remove("hidden");
+  el.innerHTML =
+    "<div class='exth'><b>" + w + "</b>" +
+    (ph ? '<span class="phon">/' + ph + "</span>" : '<span class="muted">无音标</span>') +
+    '<button class="mini-say" title="再听一次">🔊 再听一次</button></div>' +
+    "<div class='exttr'>" + (tr || "（暂无释义）") + "</div>" +
+    "<div class='muted'>词表外关联词 · 不在 10000 词表内，无法展开词网</div>";
+  const b = el.querySelector(".mini-say");
+  if (b) b.onclick = () => speak(w);
+}
+
+function renderPanel(i, extraNode) {
+  if (i === null) {
+    if (extraNode) renderExtraPanel(extraNode);
+    return;
+  }
+  extraCurrent = null;
+  $("masteryRow").style.display = "";
+  $("ph").classList.add("hidden");
+  $("detail").classList.remove("hidden");
+  $("extInfo").classList.add("hidden");
+  document.querySelectorAll("button.ext.on").forEach(x => x.classList.remove("on"));
 
   $("dWord").textContent = D.words[i];
   $("dPhon").textContent = D.phon[i] ? "/" + D.phon[i] + "/" : "";
@@ -432,14 +511,22 @@ function renderPanel(i, extraNode) {
         html += `<button data-i="${ref}">${D.words[ref]}</button>`;
       } else {
         const j = extraIdx(ref);
-        html += `<button class="ext" title="${(D.extraTrans[j] || "").split("；")[0]}">${D.extra[j]}</button>`;
+        html += `<button class="ext" data-x="${j}" title="${(extraTrans(j) || "词表外").split("；")[0].slice(0, 60)} · 点击听发音">${D.extra[j]}</button>`;
       }
     });
     html += "</div></div>";
   });
-  $("dRel").innerHTML = html || "<span style='color:#9ca3af;font-size:12px'>该词暂无关系词</span>";
+  $("dRel").innerHTML = html || "<span class='muted'>该词暂无关系词</span>";
   $("dRel").querySelectorAll("button[data-i]").forEach(b => {
     b.onclick = () => { trail.push(current); expand(+b.dataset.i); };
+  });
+  $("dRel").querySelectorAll("button.ext").forEach(b => {
+    b.onclick = () => {
+      const j = +b.dataset.x;
+      $("dRel").querySelectorAll("button.ext").forEach(x => x.classList.toggle("on", x === b));
+      showExtInfo(j);
+      speak(D.extra[j]);
+    };
   });
 }
 
@@ -450,6 +537,7 @@ document.querySelectorAll(".mbtn").forEach(b => {
     renderPanel(current);
     draw();
     renderStats();
+    if (!$("listModal").classList.contains("hidden")) renderList();
   };
 });
 
@@ -596,6 +684,9 @@ function renderStats() {
      <span class="sw" style="background:#db2777"></span>1–3k 词层
      <span class="sw" style="background:#ca8a04;margin-left:6px"></span>4–6k
      <span class="sw" style="background:#1e3a8a;margin-left:6px"></span>7–10k
+   </div>
+   <div class="li" style="margin-top:5px;border-top:1px solid #eef2f7;padding-top:5px">
+     <span class="sw" style="background:#e2e8f0;border:1px solid #cbd5e1"></span>词表外关联词（点开可看释义·听发音）
    </div>`;
 })();
 
@@ -668,6 +759,69 @@ $("mapModal").addEventListener("click", e => {
   if (e.target === $("mapModal")) $("mapModal").classList.add("hidden");
 });
 
+/* ---------- word list ---------- */
+const LIST_CAP = 600;
+let listMode = "all", listQuery = "", listCap = LIST_CAP;
+
+function listRows() {
+  const b = +$("bandSel").value;
+  const q = listQuery.trim().toLowerCase();
+  const rows = [];
+  for (let i = 0; i < N; i++) {
+    if (b && D.band[i] !== b) continue;
+    if (listMode !== "all" && statusOf(i) !== +listMode) continue;
+    if (q && D.words[i].toLowerCase().indexOf(q) < 0) continue;
+    rows.push(i);
+  }
+  return rows;
+}
+
+function renderList(resetCap) {
+  if (resetCap) listCap = LIST_CAP;
+  const b = +$("bandSel").value;
+  const rows = listRows();
+  let m = 0, l = 0;
+  rows.forEach(i => { const s = statusOf(i); if (s === 2) m++; else if (s === 1) l++; });
+  $("listSub").textContent = (b ? BAND_NAMES[b] + " 层" : "全部词层") +
+    " · " + rows.length + " 个词" +
+    (listMode === "all" ? "（掌握 " + m + " · 学习中 " + l + " · 未学 " + (rows.length - m - l) + "）" : "");
+
+  const show = rows.slice(0, listCap);
+  $("listBody").innerHTML = show.length
+    ? show.map(i =>
+        '<span class="lw s' + statusOf(i) + (i === current ? " on" : "") + '" data-i="' + i +
+        '" title="' + (b ? "" : BAND_NAMES[D.band[i]] + " · ") +
+        String(D.trans[i] || "").replace(/"/g, "").slice(0, 40) + '">' +
+        D.words[i] + "</span>").join("")
+    : '<div class="lempty">这里还没有符合条件的词</div>';
+
+  $("listMore").innerHTML = rows.length > show.length
+    ? '<button class="btn mini" id="listMoreBtn">显示更多（还有 ' + (rows.length - show.length) + ' 个）</button>'
+    : "";
+  const mb = $("listMoreBtn");
+  if (mb) mb.onclick = () => { listCap += 600; renderList(); };
+}
+
+$("listBtn").onclick = () => { renderList(true); $("listModal").classList.remove("hidden"); };
+$("listClose").onclick = () => $("listModal").classList.add("hidden");
+$("listModal").addEventListener("click", e => {
+  if (e.target === $("listModal")) $("listModal").classList.add("hidden");
+});
+$("listFilter").addEventListener("input", e => { listQuery = e.target.value; renderList(true); });
+$("listSeg").addEventListener("click", e => {
+  const btn = e.target.closest("button[data-f]");
+  if (!btn) return;
+  listMode = btn.dataset.f;
+  $("listSeg").querySelectorAll("button").forEach(x => x.classList.toggle("on", x === btn));
+  renderList(true);
+});
+$("listBody").addEventListener("click", e => {
+  const w = e.target.closest(".lw");
+  if (!w) return;
+  $("listModal").classList.add("hidden");
+  go(+w.dataset.i);
+});
+
 /* ---------- progress export / import ---------- */
 $("expBtn").onclick = () => {
   const blob = new Blob(
@@ -708,6 +862,7 @@ $("impBtn").onclick = () => {
       saveProg();
       renderStats();
       renderMap();
+      if (!$("listModal").classList.contains("hidden")) renderList(true);
       if (current !== null) renderPanel(current);
       draw();
     };
@@ -721,7 +876,10 @@ $("nextBtn").onclick = nextWord;
 $("focusBtn").onclick = focusCurrent;
 $("clearBtn").onclick = clearGraph;
 $("colorMode").onchange = draw;
-$("bandSel").onchange = () => { renderStats(); };
+$("bandSel").onchange = () => {
+  renderStats();
+  if (!$("listModal").classList.contains("hidden")) renderList(true);
+};
 
 document.querySelectorAll(".quick button").forEach(b => b.onclick = () => go(b.dataset.w));
 
@@ -731,6 +889,10 @@ document.addEventListener("keydown", e => {
   if (e.key === "f" || e.key === "F") focusCurrent();
   if (e.key === "p" || e.key === "P") speakCurrent();
   if (e.key === "m" || e.key === "M") { renderMap(); $("mapModal").classList.remove("hidden"); }
+  if (e.key === "l" || e.key === "L") {
+    if ($("listModal").classList.contains("hidden")) { renderList(true); $("listModal").classList.remove("hidden"); }
+    else $("listModal").classList.add("hidden");
+  }
 });
 
 window.addEventListener("resize", () => { if (sim) { sim.force("center", d3.forceCenter(width() / 2, height() / 2)); sim.alpha(0.3).restart(); } });
