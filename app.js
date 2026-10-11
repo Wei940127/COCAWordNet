@@ -44,8 +44,6 @@ const setStatus = (i, s) => {
      否则另一台设备的旧数据在合并时会把这个词“复活”。 */
   prog[D.words[i]] = { s, t: Date.now() };
   saveProg();
-  const h = window.COCASyncHooks;
-  if (h && h.onLocalChange) { try { h.onLocalChange(); } catch (e) {} }
 };
 
 /* ---------- data helpers ---------- */
@@ -292,7 +290,9 @@ function draw() {
     .attr("stroke-dasharray", l => (l.t === 4 ? "4 3" : null));
   linkSel = le.merge(linkSel);
 
-  sim.on("tick", () => {
+  /* sim 只有在展开过词之后才存在：空画布上合并进度时 draw() 会被直接调用，
+     这里必须判空，否则整段刷新会中断。 */
+  if (sim) sim.on("tick", () => {
     linkSel.attr("x1", l => l.source.x).attr("y1", l => l.source.y)
            .attr("x2", l => l.target.x).attr("y2", l => l.target.y);
     all.attr("transform", d => `translate(${d.x},${d.y})`);
@@ -827,7 +827,141 @@ $("listBody").addEventListener("click", e => {
   go(+w.dataset.i);
 });
 
-/* ---------- progress export / import ---------- */
+/* ---------- 跨设备迁移：合并规则 ---------- */
+
+/* 从导出的对象里挑出有效记录。保留每条记录自己的时间戳，
+   这样合并时能判断“哪台设备的修改更新”。 */
+function pickValid(p) {
+  const clean = {};
+  let skipped = 0;
+  for (const k in p) {
+    const v = p[k];
+    const s = v && v.s;
+    if (D.idx[k] !== undefined && (s === 0 || s === 1 || s === 2)) {
+      clean[k] = { s: s, t: (typeof v.t === "number" && v.t > 0) ? v.t : Date.now() };
+    } else skipped++;
+  }
+  return { clean: clean, skipped: skipped };
+}
+
+/* 逐词比较时间戳，较新的一条胜出；两边都有的词不会丢。 */
+function mergeIntoProg(incoming) {
+  let added = 0, updated = 0;
+  for (const k in incoming) {
+    const v = incoming[k];
+    const cur = prog[k];
+    if (!cur || v.t > (cur.t || 0)) {
+      prog[k] = { s: v.s, t: v.t };
+      if (cur) updated++; else added++;
+    }
+  }
+  return { added: added, updated: updated };
+}
+
+/* 所有依赖进度的界面统一刷新 */
+function refreshProgressViews() {
+  renderStats();
+  if (!$("mapModal").classList.contains("hidden")) renderMap();
+  if (!$("listModal").classList.contains("hidden")) renderList(true);
+  if (current !== null) renderPanel(current);
+  draw();
+}
+
+/* ---------- 跨设备同步码 ----------
+   把进度压成一段可以随便粘贴的文字：没有引号、没有反斜杠、没有 + / =
+   这些聊天软件容易转义或换行的字符，全部由 0-9a-z 组成。
+
+   格式：CWN1.<导出分钟>.<条数>.<下标>-<状态>-<多少分钟前>...
+   时间只精确到分钟 —— 合并只需要判断先后顺序，够用了，
+   而且能把每个词的记录压到 8 个字符左右。 */
+const CODE_HEAD = "CWN1";
+const b36 = n => Math.abs(n).toString(36);
+const fromB36 = s => parseInt(s, 36) || 0;
+
+function encodeProgress() {
+  const base = Math.floor(Date.now() / 60000);      /* 当前时间（分钟） */
+  const parts = [];
+  for (const k in prog) {
+    const v = prog[k];
+    if (!v || (v.s !== 0 && v.s !== 1 && v.s !== 2)) continue;
+    const i = D.idx[k];
+    if (i === undefined) continue;
+    const age = Math.max(0, base - Math.floor((v.t || Date.now()) / 60000));
+    parts.push(b36(i) + "-" + v.s + "-" + b36(age));
+  }
+  return [CODE_HEAD, b36(base), b36(parts.length)].join(".") + "." + parts.join(".");
+}
+
+function decodeProgress(text) {
+  const s = String(text || "").trim().replace(/\s+/g, "");
+  if (!s) throw new Error("请先把同步码粘到下面的框里");
+  const seg = s.split(".");
+  if (seg[0] !== CODE_HEAD) throw new Error("这不是本应用的同步码（开头应该是 " + CODE_HEAD + "）");
+  if (seg.length < 4) throw new Error("同步码不完整，可能复制的时候被截断了");
+  const base = fromB36(seg[1]);
+  const expect = fromB36(seg[2]);
+  const out = {};
+  let bad = 0;
+  for (let n = 3; n < seg.length; n++) {
+    const tk = seg[n].split("-");
+    const i = tk.length === 3 ? fromB36(tk[0]) : -1;
+    const st = tk.length === 3 ? parseInt(tk[1], 10) : -1;
+    if (tk.length !== 3 || (st !== 0 && st !== 1 && st !== 2) || i < 0 || i >= N) { bad++; continue; }
+    out[D.words[i]] = { s: st, t: Math.max(1, (base - fromB36(tk[2])) * 60000) };
+  }
+  const n = Object.keys(out).length;
+  if (!n) throw new Error("这段码里没有任何进度记录");
+  return { prog: out, count: n, truncated: bad > 0 || n !== expect };
+}
+
+function codeMsg(t, cls) {
+  const m = $("codeMsg");
+  m.textContent = t;
+  m.className = "codemsg" + (cls ? " " + cls : "");
+}
+
+$("codeBtn").onclick = () => {
+  $("codeOut").value = encodeProgress();
+  $("codeIn").value = "";
+  codeMsg(learnedCount() ? "这台设备有 " + learnedCount() + " 条进度，点「复制同步码」即可带走。" : "这台设备还没有进度记录。");
+  $("codeModal").classList.remove("hidden");
+};
+$("codeClose").onclick = () => $("codeModal").classList.add("hidden");
+$("codeGen").onclick = () => {
+  $("codeOut").value = encodeProgress();
+  codeMsg("已重新生成（含 " + learnedCount() + " 条进度）。", "good");
+};
+$("codeCopy").onclick = () => {
+  const ta = $("codeOut");
+  if (!ta.value) ta.value = encodeProgress();
+  const ok = () => codeMsg("已复制！\n发到另一台设备（微信「文件传输助手」或备忘录最省事），打开应用 → 进度地图 → 跨设备同步 → 粘进去 → 「合并到本机」。", "good");
+  const manual = () => {
+    ta.focus(); ta.select();
+    try { ta.setSelectionRange(0, ta.value.length); } catch (e) {}
+    codeMsg("浏览器没让自动复制：码已选中，请长按（或右键）选择「拷贝」。", "bad");
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(ta.value).then(ok).catch(manual);
+  } else manual();
+};
+$("codeClear").onclick = () => { $("codeIn").value = ""; $("codeIn").focus(); };
+$("codeApply").onclick = () => {
+  let res;
+  codeMsg("正在校验同步码…");
+  try { res = decodeProgress($("codeIn").value); }
+  catch (e) { codeMsg(e.message, "bad"); return; }
+  if (res.truncated && !confirm("这段同步码看起来不完整（可能粘贴时被截断了），仍要合并吗？")) {
+    codeMsg("已取消，本机进度没有变化。");
+    return;
+  }
+  const r = mergeIntoProg(res.prog);
+  saveProg();
+  refreshProgressViews();
+  $("codeOut").value = encodeProgress();
+  codeMsg("合并完成：新增 " + r.added + " 条，更新 " + r.updated + " 条。本机现在共 " + learnedCount() + " 条进度 —— 把这台设备的新码复制回另一台，两边就完全一致了。", "good");
+};
+
+/* ---------- 进度导出 / 导入（JSON 文件，适合长期备份） ---------- */
 $("expBtn").onclick = () => {
   const blob = new Blob(
     [JSON.stringify({ app: "COCAWordNet", v: 1, exported: new Date().toISOString(), prog }, null, 1)],
@@ -851,29 +985,21 @@ $("impBtn").onclick = () => {
       try { obj = JSON.parse(String(rd.result)); } catch (e) { alert("文件不是有效的 JSON"); return; }
       const p = (obj && typeof obj === "object") ? (obj.prog || obj) : null;
       if (!p || typeof p !== "object") { alert("文件里没有进度数据"); return; }
-      const clean = {};
-      let skipped = 0;
-      for (const k in p) {
-        const v = p[k];
-        /* 导入是「以这份文件为准」的显式操作，统一用当前时间打戳，
-           这样随后与云端合并时，不会被旧数据覆盖回去 */
-        if (D.idx[k] !== undefined && v && (v.s === 1 || v.s === 2)) clean[k] = { s: v.s, t: Date.now() };
-        else skipped++;
-      }
-      const n = Object.keys(clean).length;
+      const res = pickValid(p);
+      const n = Object.keys(res.clean).length;
       if (!n) { alert("没有找到有效的进度记录（需要是本应用导出的文件）"); return; }
-      const cur = learnedCount();
-      if (!confirm("读到 " + n + " 条有效进度" + (skipped ? "（跳过 " + skipped + " 条无效）" : "") +
-        "。\n当前进度 " + cur + " 条，导入将覆盖现有进度。继续吗？")) return;
-      prog = clean;
-      saveProg();
-      renderStats();
-      renderMap();
-      if (!$("listModal").classList.contains("hidden")) renderList(true);
-      if (current !== null) renderPanel(current);
-      draw();
-      const _h = window.COCASyncHooks;
-      if (_h && _h.onLocalChange) { try { _h.onLocalChange(); } catch (e) {} }
+      const merge = confirm("读到 " + n + " 条有效进度" +
+        (res.skipped ? "（跳过 " + res.skipped + " 条无效）" : "") +
+        "。\n\n【确定】= 与现有进度合并（推荐，两边都保留）\n【取消】= 用这份文件覆盖现有进度");
+      if (merge) {
+        const r = mergeIntoProg(res.clean);
+        saveProg(); refreshProgressViews();
+        alert("合并完成：新增 " + r.added + " 条，更新 " + r.updated + " 条。当前共 " + learnedCount() + " 条。");
+      } else {
+        prog = res.clean;
+        saveProg(); refreshProgressViews();
+        alert("已覆盖，当前共 " + learnedCount() + " 条进度。");
+      }
     };
     rd.readAsText(f);
   };
@@ -905,22 +1031,6 @@ document.addEventListener("keydown", e => {
 });
 
 window.addEventListener("resize", () => { if (sim) { sim.force("center", d3.forceCenter(width() / 2, height() / 2)); sim.alpha(0.3).restart(); } });
-
-/* ---------- 跨设备同步挂钩（供 sync.js 调用；未启用云端时完全闲置） ---------- */
-window.COCASyncHooks = {
-  getProg: () => prog,
-  learnedCount,
-  applyProg: p => {
-    prog = (p && typeof p === "object") ? p : {};
-    saveProg();
-    renderStats();
-    if (!$("mapModal").classList.contains("hidden")) renderMap();
-    if (!$("listModal").classList.contains("hidden")) renderList(true);
-    if (current !== null) renderPanel(current);
-    draw();
-  },
-  onLocalChange: null
-};
 
 /* ---------- boot ---------- */
 const _loader = document.getElementById("loader");

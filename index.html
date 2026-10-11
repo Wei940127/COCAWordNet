@@ -57,7 +57,6 @@
     </select>
     <button id="mapBtn" class="btn" title="按词层查看学习进度（快捷键 M）">▦ 进度地图</button>
     <button id="listBtn" class="btn" title="查看当前词层的全部单词（快捷键 L）">☰ 单词列表</button>
-    <button id="syncBtn" class="btn sync" style="display:none" title="登录后可在 iPad、手机、电脑间同步学习进度"><span class="sdot"></span><span id="syncLabel">登录同步</span></button>
     <button id="nextBtn" class="btn primary" title="随机跳到下一个未掌握的词（快捷键 N）">下一个词 ▸</button>
   </div>
 
@@ -163,8 +162,9 @@
     <div class="mfoot">
       <span>点击任意词层，直接跳到该层开始学习 · 绿=已掌握 · 琥珀=学习中 · 灰=未学</span>
       <span class="mio">
-        <button id="expBtn" class="btn mini" title="把学习进度保存为 JSON 文件">⇩ 导出进度</button>
-        <button id="impBtn" class="btn mini" title="从 JSON 文件恢复学习进度">⇧ 导入进度</button>
+        <button id="codeBtn" class="btn mini" title="用一段同步码，把进度搬到 iPad / 手机，无需账号和联网">⇄ 跨设备同步</button>
+        <button id="expBtn" class="btn mini" title="把学习进度保存为 JSON 文件">⇩ 导出文件</button>
+        <button id="impBtn" class="btn mini" title="从 JSON 文件恢复学习进度">⇧ 导入文件</button>
       </span>
     </div>
   </div>
@@ -193,44 +193,46 @@
   </div>
 </div>
 
-<div id="syncModal" class="modal hidden">
-  <div class="modalCard narrow">
+<div id="codeModal" class="modal hidden">
+  <div class="modalCard">
     <div class="mhead">
-      <b>跨设备同步 <small>登录后，iPad 和手机共用同一份学习进度</small></b>
-      <button id="syncClose" class="mclose" title="关闭">✕</button>
+      <b>跨设备同步 <small>不用账号、不用联网，一段码就能搬进度</small></b>
+      <button id="codeClose" class="mclose" title="关闭">✕</button>
     </div>
 
-    <div id="syncGate" class="syncbody">
-      <p class="synctip">第一次用请点「创建账号」，已经有账号就直接「登录」。<br>账号只用来存进度，不需要邮箱验证，也收不到任何邮件。</p>
-      <label class="syncfield"><span>邮箱</span>
-        <input id="syncEmail" type="email" autocomplete="email" spellcheck="false" placeholder="you@example.com"></label>
-      <label class="syncfield" id="syncPassRow"><span>密码</span>
-        <input id="syncPass" type="password" autocomplete="current-password" placeholder="至少 6 位，请记牢"></label>
-      <div id="syncPwBtns" class="syncacts">
-        <button id="syncSignIn" class="btn primary">登录</button>
-        <button id="syncSignUp" class="btn">创建账号</button>
+    <div class="codebody">
+      <ol class="codesteps">
+        <li>在<b>这台设备</b>点「复制同步码」，把这段文字发到另一台设备（微信「文件传输助手」、备忘录、邮件、AirDrop 都行）。</li>
+        <li>在<b>另一台设备</b>打开本应用 → 进度地图 → 跨设备同步 → 粘进下面的框 → 点「合并到本机」。</li>
+      </ol>
+
+      <div class="codeblock">
+        <div class="coderow">
+          <span>① 这台设备的进度</span>
+          <span class="codeacts">
+            <button id="codeGen" class="btn mini">重新生成</button>
+            <button id="codeCopy" class="btn mini primary">复制同步码</button>
+          </span>
+        </div>
+        <textarea id="codeOut" class="codeta" readonly spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="点「重新生成」"></textarea>
       </div>
-      <div id="syncOtpBox" class="hidden">
-        <div class="syncacts"><button id="syncOtpSend" class="btn">发送验证码</button></div>
-        <label class="syncfield hidden" id="syncOtpRow"><span>验证码</span>
-          <input id="syncOtp" inputmode="numeric" autocomplete="one-time-code" placeholder="6 位数字"></label>
-        <div class="syncacts"><button id="syncOtpGo" class="btn primary">验证并登录</button></div>
+
+      <div class="codeblock">
+        <div class="coderow">
+          <span>② 粘贴另一台设备的码</span>
+          <span class="codeacts">
+            <button id="codeClear" class="btn mini">清空</button>
+            <button id="codeApply" class="btn mini primary">合并到本机</button>
+          </span>
+        </div>
+        <textarea id="codeIn" class="codeta" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="把另一台设备的同步码粘到这里"></textarea>
       </div>
     </div>
 
-    <div id="syncPanel" class="syncbody hidden">
-      <p class="syncline">已登录：<b id="syncWho"></b></p>
-      <p class="syncline">上次同步：<b id="syncLast"></b></p>
-      <div class="syncacts">
-        <button id="syncNow" class="btn primary">立即同步</button>
-        <button id="syncOut" class="btn">退出登录</button>
-      </div>
-    </div>
-
-    <div id="syncMsg" class="syncmsg"></div>
+    <div id="codeMsg" class="codemsg"></div>
 
     <div class="mfoot">
-      <span>进度存在你自己的 Supabase 数据库里，按账号隔离 · 没登录时应用完全离线可用</span>
+      <span>合并规则：逐词比较修改时间取较新的一条 —— 两边各自学过的词都会保留，不会互相覆盖。</span>
     </div>
   </div>
 </div>
@@ -243,8 +245,6 @@
 <script src="d3.min.js"></script>
 <script src="data.js" onerror="window.__DATA_FAIL=1"></script>
 <script src="app.js"></script>
-<script src="supa-config.js"></script>
-<script src="sync.js"></script>
 <script>
 /* PWA: register offline cache (skipped when opened from a local file) */
 if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {
