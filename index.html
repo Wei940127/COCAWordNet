@@ -2,11 +2,17 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>COCAWordNet</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#f4f6f9">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="COCAWordNet">
 <link rel="stylesheet" href="style.css">
 <link rel="icon" href="favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="icon.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 </head>
 <body>
 
@@ -186,7 +192,36 @@
   </div>
 </div>
 
+<div id="iosHint" class="ioshint hidden">
+  <span>📱 想像 App 一样全屏使用？点 Safari 底部<b>分享 ⬆</b>，选「添加到主屏幕」。</span>
+  <button id="iosHintClose" title="不再提示">✕</button>
+</div>
+
 <script src="d3.min.js"></script>
 <script src="data.js" onerror="window.__DATA_FAIL=1"></script>
-<script src="app.js"></script></body>
+<script src="app.js"></script>
+<script>
+/* PWA: register offline cache (skipped when opened from a local file) */
+if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  });
+}
+/* iPad / iPhone Safari: show the "Add to Home Screen" tip once */
+(function () {
+  try {
+    var standalone = window.navigator.standalone === true ||
+      window.matchMedia("(display-mode: standalone)").matches;
+    var ios = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    if (ios && !standalone && !localStorage.getItem("coca10000.ioshint")) {
+      document.getElementById("iosHint").classList.remove("hidden");
+      document.getElementById("iosHintClose").onclick = function () {
+        document.getElementById("iosHint").classList.add("hidden");
+        localStorage.setItem("coca10000.ioshint", "1");
+      };
+    }
+  } catch (e) {}
+})();
+</script></body>
 </html>

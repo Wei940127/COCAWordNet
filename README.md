@@ -21,7 +21,7 @@
 - **进度地图**：按 1k–10k 词频层的进度热力图，自动标出短板层，点击直接开刷
 - **进度导入导出**：学习进度可一键导出为 JSON 文件备份，换浏览器/换电脑随时恢复
 - **搜索联想**：支持词族成员跳转，搜 government 直达词头 govern（24,000+ 条别名映射）
-- **完全离线**：纯静态、无后端、无账号，数据全部打包在本地
+- **可装成 App**：支持「添加到主屏幕」（PWA），拥有独立图标、全屏无浏览器边框运行；Service Worker 预缓存整个词库，**断网也能用**
 
 ## 🚀 快速开始
 
@@ -34,6 +34,23 @@
 3. 一分钟后访问 `https://wei940127.github.io/COCAWordNet/`
 
 也可以用任何静态托管（Vercel / Netlify / Cloudflare Pages），直接导入仓库即可，无需构建。
+
+### 方式三：装到 iPad / iPhone（当作 App 用，推荐）
+无需 App Store、无需越狱、无需签名。用 Safari 打开线上地址后「添加到主屏幕」即可，效果等同原生 App：
+
+1. 在 iPad 上用 **Safari**（必须是 Safari，Chrome / 微信内置浏览器不支持添加到主屏幕）打开
+   `https://wei940127.github.io/COCAWordNet/`
+2. 等待首次加载完成（约 7MB 词库，会显示进度圈；之后从缓存秒开）
+3. 点击 Safari 地址栏右侧的 **分享按钮 ⬆**（若无地址栏，先轻点屏幕顶部唤出）
+4. 在弹出菜单中下滑，选择 **「添加到主屏幕」**
+5. 右上角点 **「添加」**
+
+主屏幕上会出现 **COCAWordNet** 图标。之后：
+- 从图标进入即 **全屏运行**，没有地址栏和标签页，和 App 一样
+- **断网也能用**（首次打开后词库已缓存到本地；仅「真人美音」需要联网，断网会自动回退为系统语音合成）
+- 学习进度存在 iPad 本地，不会被清理；换设备时用「进度地图 → 导出/导入」迁移
+
+> 想同步到 iPhone？同一地址重复上面步骤即可。Android 用 Chrome 打开会直接提示「安装应用」。
 
 ### 本地起服务（可选）
 ```bash
@@ -80,8 +97,9 @@ python -m http.server 8765
 
 - 纯静态单页应用：`index.html + app.js + style.css + data.js + d3.min.js`（图标 `favicon.ico` / `icon.png`），零依赖、零构建
 - `data.js`（约 7MB）为预计算的 JSON 数据：词表、关系边、词典、构词、搭配
+- 离线 / 可安装：`sw.js`（Service Worker）预缓存应用外壳与整个词库，`manifest.webmanifest` + `apple-touch-icon.png` 提供「添加到主屏幕」能力（PWA）
 - 学习状态（掌握度）存于 localStorage，不上传任何数据
-- 建议使用 Chrome / Edge / Firefox 现代浏览器
+- 建议使用 Chrome / Edge / Firefox 现代浏览器；iPad 上请用 Safari 添加到主屏幕
 
 ## 📄 License
 
