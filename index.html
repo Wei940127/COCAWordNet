@@ -57,6 +57,7 @@
     </select>
     <button id="mapBtn" class="btn" title="按词层查看学习进度（快捷键 M）">▦ 进度地图</button>
     <button id="listBtn" class="btn" title="查看当前词层的全部单词（快捷键 L）">☰ 单词列表</button>
+    <button id="syncBtn" class="btn sync" style="display:none" title="登录后可在 iPad、手机、电脑间同步学习进度"><span class="sdot"></span><span id="syncLabel">登录同步</span></button>
     <button id="nextBtn" class="btn primary" title="随机跳到下一个未掌握的词（快捷键 N）">下一个词 ▸</button>
   </div>
 
@@ -192,6 +193,48 @@
   </div>
 </div>
 
+<div id="syncModal" class="modal hidden">
+  <div class="modalCard narrow">
+    <div class="mhead">
+      <b>跨设备同步 <small>登录后，iPad 和手机共用同一份学习进度</small></b>
+      <button id="syncClose" class="mclose" title="关闭">✕</button>
+    </div>
+
+    <div id="syncGate" class="syncbody">
+      <p class="synctip">第一次用请点「创建账号」，已经有账号就直接「登录」。<br>账号只用来存进度，不需要邮箱验证，也收不到任何邮件。</p>
+      <label class="syncfield"><span>邮箱</span>
+        <input id="syncEmail" type="email" autocomplete="email" spellcheck="false" placeholder="you@example.com"></label>
+      <label class="syncfield" id="syncPassRow"><span>密码</span>
+        <input id="syncPass" type="password" autocomplete="current-password" placeholder="至少 6 位，请记牢"></label>
+      <div id="syncPwBtns" class="syncacts">
+        <button id="syncSignIn" class="btn primary">登录</button>
+        <button id="syncSignUp" class="btn">创建账号</button>
+      </div>
+      <div id="syncOtpBox" class="hidden">
+        <div class="syncacts"><button id="syncOtpSend" class="btn">发送验证码</button></div>
+        <label class="syncfield hidden" id="syncOtpRow"><span>验证码</span>
+          <input id="syncOtp" inputmode="numeric" autocomplete="one-time-code" placeholder="6 位数字"></label>
+        <div class="syncacts"><button id="syncOtpGo" class="btn primary">验证并登录</button></div>
+      </div>
+    </div>
+
+    <div id="syncPanel" class="syncbody hidden">
+      <p class="syncline">已登录：<b id="syncWho"></b></p>
+      <p class="syncline">上次同步：<b id="syncLast"></b></p>
+      <div class="syncacts">
+        <button id="syncNow" class="btn primary">立即同步</button>
+        <button id="syncOut" class="btn">退出登录</button>
+      </div>
+    </div>
+
+    <div id="syncMsg" class="syncmsg"></div>
+
+    <div class="mfoot">
+      <span>进度存在你自己的 Supabase 数据库里，按账号隔离 · 没登录时应用完全离线可用</span>
+    </div>
+  </div>
+</div>
+
 <div id="iosHint" class="ioshint hidden">
   <span>📱 想像 App 一样全屏使用？点 Safari 底部<b>分享 ⬆</b>，选「添加到主屏幕」。</span>
   <button id="iosHintClose" title="不再提示">✕</button>
@@ -200,6 +243,8 @@
 <script src="d3.min.js"></script>
 <script src="data.js" onerror="window.__DATA_FAIL=1"></script>
 <script src="app.js"></script>
+<script src="supa-config.js"></script>
+<script src="sync.js"></script>
 <script>
 /* PWA: register offline cache (skipped when opened from a local file) */
 if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {

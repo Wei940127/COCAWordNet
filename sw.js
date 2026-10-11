@@ -9,7 +9,7 @@
    Bump CACHE whenever app files or data.js change, so clients pick up the new version. */
 "use strict";
 
-const CACHE = "cocawn-v3";
+const CACHE = "cocawn-v4";
 
 /* Small app shell — must all fit in the install step. */
 const SHELL = [
@@ -17,6 +17,8 @@ const SHELL = [
   "./index.html",
   "./app.js",
   "./style.css",
+  "./sync.js",
+  "./supa-config.js",
   "./d3.min.js",
   "./manifest.webmanifest",
   "./icon.png",

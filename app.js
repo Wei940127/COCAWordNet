@@ -37,10 +37,15 @@ let prog = {};
 try { prog = JSON.parse(localStorage.getItem(LS) || "{}") || {}; } catch (e) { prog = {}; }
 const saveProg = () => { try { localStorage.setItem(LS, JSON.stringify(prog)); } catch (e) {} };
 const statusOf = i => (prog[D.words[i]] ? prog[D.words[i]].s : 0);
+/* 只统计真正学过的词（s=0 的记录是给同步用的“墓碑”，不算数） */
+const learnedCount = () => { let n = 0; for (const k in prog) if (prog[k] && prog[k].s) n++; return n; };
 const setStatus = (i, s) => {
-  if (s === 0) delete prog[D.words[i]];
-  else prog[D.words[i]] = { s, t: Date.now() };
+  /* 取消标记时保留一条 s=0 的记录（墓碑）而不是删除：
+     否则另一台设备的旧数据在合并时会把这个词“复活”。 */
+  prog[D.words[i]] = { s, t: Date.now() };
   saveProg();
+  const h = window.COCASyncHooks;
+  if (h && h.onLocalChange) { try { h.onLocalChange(); } catch (e) {} }
 };
 
 /* ---------- data helpers ---------- */
@@ -850,12 +855,14 @@ $("impBtn").onclick = () => {
       let skipped = 0;
       for (const k in p) {
         const v = p[k];
-        if (D.idx[k] !== undefined && v && (v.s === 1 || v.s === 2)) clean[k] = { s: v.s, t: v.t || Date.now() };
+        /* 导入是「以这份文件为准」的显式操作，统一用当前时间打戳，
+           这样随后与云端合并时，不会被旧数据覆盖回去 */
+        if (D.idx[k] !== undefined && v && (v.s === 1 || v.s === 2)) clean[k] = { s: v.s, t: Date.now() };
         else skipped++;
       }
       const n = Object.keys(clean).length;
       if (!n) { alert("没有找到有效的进度记录（需要是本应用导出的文件）"); return; }
-      const cur = Object.keys(prog).length;
+      const cur = learnedCount();
       if (!confirm("读到 " + n + " 条有效进度" + (skipped ? "（跳过 " + skipped + " 条无效）" : "") +
         "。\n当前进度 " + cur + " 条，导入将覆盖现有进度。继续吗？")) return;
       prog = clean;
@@ -865,6 +872,8 @@ $("impBtn").onclick = () => {
       if (!$("listModal").classList.contains("hidden")) renderList(true);
       if (current !== null) renderPanel(current);
       draw();
+      const _h = window.COCASyncHooks;
+      if (_h && _h.onLocalChange) { try { _h.onLocalChange(); } catch (e) {} }
     };
     rd.readAsText(f);
   };
@@ -896,6 +905,22 @@ document.addEventListener("keydown", e => {
 });
 
 window.addEventListener("resize", () => { if (sim) { sim.force("center", d3.forceCenter(width() / 2, height() / 2)); sim.alpha(0.3).restart(); } });
+
+/* ---------- 跨设备同步挂钩（供 sync.js 调用；未启用云端时完全闲置） ---------- */
+window.COCASyncHooks = {
+  getProg: () => prog,
+  learnedCount,
+  applyProg: p => {
+    prog = (p && typeof p === "object") ? p : {};
+    saveProg();
+    renderStats();
+    if (!$("mapModal").classList.contains("hidden")) renderMap();
+    if (!$("listModal").classList.contains("hidden")) renderList(true);
+    if (current !== null) renderPanel(current);
+    draw();
+  },
+  onLocalChange: null
+};
 
 /* ---------- boot ---------- */
 const _loader = document.getElementById("loader");
