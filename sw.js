@@ -1,11 +1,18 @@
 /* COCAWordNet service worker — offline app shell + word data.
+
+   Design note: the 7.5 MB data.js is deliberately NOT precached inside the
+   install event. A long install delays activation, and on a slow mobile link
+   it can be interrupted, leaving the app with no active service worker at all.
+   Instead the shell installs instantly, then the big file is warmed into the
+   cache in the background right after activation.
+
    Bump CACHE whenever app files or data.js change, so clients pick up the new version. */
 "use strict";
 
-const CACHE = "cocawn-v2";
+const CACHE = "cocawn-v3";
 
-/* Small app shell. */
-const CORE = [
+/* Small app shell — must all fit in the install step. */
+const SHELL = [
   "./",
   "./index.html",
   "./app.js",
@@ -19,18 +26,26 @@ const CORE = [
   "./favicon.ico"
 ];
 
-/* The 7.5 MB word database. Kept separate so a slow/failed copy can never
-   abort the install — each URL is fetched independently. */
-const DATA = ["./data.js"];
+/* The heavy word database — warmed asynchronously, never blocking install. */
+const WARM = ["./data.js"];
 
-const ALL = CORE.concat(DATA);
+/* Fetch a URL and store it, reusing the HTTP cache when possible.
+   Never rejects: a failed warm-up must not break anything. */
+async function cacheUrl(url) {
+  try {
+    const c = await caches.open(CACHE);
+    if (await c.match(url)) return true;
+    const res = await fetch(url, { credentials: "same-origin" });
+    if (res && res.ok) await c.put(url, res.clone());
+    return true;
+  } catch (_) { return false; }
+}
 
 self.addEventListener("install", e => {
   e.waitUntil((async () => {
     const c = await caches.open(CACHE);
-    /* Never use addAll(): it is atomic, so one bad URL would cache nothing.
-       Fetch each entry on its own and swallow individual failures. */
-    await Promise.all(ALL.map(u => c.add(new Request(u, { cache: "reload" })).catch(() => {})));
+    /* Never use addAll(): it is atomic, so one bad URL would cache nothing. */
+    await Promise.all(SHELL.map(u => c.add(new Request(u, { cache: "reload" })).catch(() => {})));
     await self.skipWaiting();
   })());
 });
@@ -40,6 +55,8 @@ self.addEventListener("activate", e => {
     const keys = await caches.keys();
     await Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)));
     await self.clients.claim();
+    /* Background warm-up: started but not awaited, so activation is instant. */
+    WARM.forEach(u => { cacheUrl(u); });
   })());
 });
 
