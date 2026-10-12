@@ -97,6 +97,18 @@ main { flex: 1; display: flex; min-height: 0; }
 }
 .legend .li { display: flex; align-items: center; gap: 7px; }
 .legend .sw { width: 18px; height: 3px; border-radius: 2px; }
+/* 10 阶词频色带：高频 → 低频 */
+.legend .bandblock {
+  margin-top: 5px; padding-top: 6px; border-top: 1px solid #eef2f7;
+  display: flex; flex-direction: column; gap: 4px;
+  width: 188px; max-width: 100%;
+}
+.legend .bandramp { display: flex; width: 100%; height: 9px; border-radius: 3px; overflow: hidden; }
+.legend .bandramp span { flex: 1 1 0; }
+.legend .bandscale {
+  display: flex; justify-content: space-between; gap: 6px;
+  font-size: 10px; color: #94a3b8; letter-spacing: .2px;
+}
 
 .tooltip {
   position: absolute; z-index: 30; pointer-events: none;
@@ -304,12 +316,16 @@ main { flex: 1; display: flex; min-height: 0; }
 .loader.err .ltext { color: #b91c1c; max-width: 440px; text-align: center; line-height: 1.8; }
 .loader.err .ltext small { color: #94a3b8; display: block; margin-top: 6px; }
 .brow {
-  display: grid; grid-template-columns: 52px 1fr 150px; gap: 12px; align-items: center;
+  display: grid; grid-template-columns: 70px 1fr 150px; gap: 12px; align-items: center;
   padding: 8px 10px; border-radius: 10px; cursor: pointer;
 }
 .brow:hover { background: #f8fafc; }
 .brow .bl { font-weight: 700; font-size: 14px; color: #334155; }
 .brow .bl small { display: block; font-weight: 400; font-size: 11px; color: #94a3b8; }
+.bl .bdot {
+  display: inline-block; width: 9px; height: 9px; border-radius: 3px;
+  margin-right: 6px; vertical-align: 1px;
+}
 .brow.weak .bl { color: #dc2626; }
 .brow.weak .bl::after { content: "短板"; font-size: 10px; color: #fff; background: #dc2626; border-radius: 4px; padding: 1px 5px; margin-left: 6px; vertical-align: 2px; }
 .stack { display: flex; height: 18px; border-radius: 9px; overflow: hidden; background: #cbd5e1; }
@@ -318,7 +334,7 @@ main { flex: 1; display: flex; min-height: 0; }
 .bnum { font-size: 12px; color: #475569; text-align: right; line-height: 1.5; }
 .bnum b { color: #16a34a; }
 .mrow {
-  display: grid; grid-template-columns: 52px 1fr 150px; gap: 12px; align-items: center;
+  display: grid; grid-template-columns: 70px 1fr 150px; gap: 12px; align-items: center;
   padding: 10px 10px 12px; margin-bottom: 6px; border-radius: 10px;
   background: #f8fafc; border: 1px solid #eef2f7;
 }

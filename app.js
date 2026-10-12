@@ -48,6 +48,18 @@ const setStatus = (i, s) => {
 
 /* ---------- data helpers ---------- */
 const BAND_NAMES = { 1: "1k", 2: "2k", 3: "3k", 4: "4k", 5: "5k", 6: "6k", 7: "7k", 8: "8k", 9: "9k", 10: "10k" };
+
+/* 每个词层（1000 词一档）各有一种颜色：由高频的暖粉渐变到低频的深蓝，
+   这样图上任何一点都能看出它属于哪个频率层 */
+const BAND_COLORS = {
+  1: "#f43f5e", 2: "#ec4899", 3: "#d946ef", 4: "#a855f7", 5: "#8b5cf6",
+  6: "#6366f1", 7: "#3b82f6", 8: "#2563eb", 9: "#1d4ed8", 10: "#1e3a8a"
+};
+/* 每层的词频排名区间，如 4k => "3001–4000" */
+const BAND_RANGE = {};
+for (let _b = 1; _b <= 10; _b++) BAND_RANGE[_b] = ((_b - 1) * 1000 + 1) + "–" + (_b * 1000);
+const bandColor = b => BAND_COLORS[b] || "#94a3b8";
+
 const isWord = r => r >= 0;
 const extraIdx = r => -r - 1;
 
@@ -205,7 +217,7 @@ function nodeFill(d) {
   const mode = document.getElementById("colorMode").value;
   if (d.kind === "x") return "#e2e8f0";
   if (mode === "flat") return "#94a3b8";
-  if (mode === "band") return d.band <= 3 ? "#db2777" : d.band <= 6 ? "#ca8a04" : "#1e3a8a";
+  if (mode === "band") return bandColor(d.band);
   const s = statusOf(d.i);
   return s === 2 ? "#16a34a" : s === 1 ? "#f59e0b" : "#cbd5e1";
 }
@@ -306,7 +318,7 @@ function showTip(e, d) {
   if (d.kind === "w") {
     const ph = D.phon[d.i];
     if (ph) html += ' <span class="tp">/' + ph + "/</span>";
-    html += ' <span class="tp">· ' + BAND_NAMES[D.band[d.i]] + "词层</span>";
+    html += ' <span class="tp">· ' + BAND_NAMES[D.band[d.i]] + "词层（第 " + BAND_RANGE[D.band[d.i]] + " 词）</span>";
     const tr = (D.trans[d.i] || "").split("；")[0];
     if (tr) html += "<br>" + tr.slice(0, 90);
   } else {
@@ -443,7 +455,7 @@ function renderPanel(i, extraNode) {
 
   $("dWord").textContent = D.words[i];
   $("dPhon").textContent = D.phon[i] ? "/" + D.phon[i] + "/" : "";
-  $("dBand").textContent = BAND_NAMES[D.band[i]] + " 词层";
+  $("dBand").textContent = BAND_NAMES[D.band[i]] + " 词层 · 高频第 " + BAND_RANGE[D.band[i]] + " 词";
   const tags = (D.tag[i] || "").split(" ").filter(Boolean);
   $("dTags").innerHTML = tags.map(t => "<i>" + t + "</i>").join("");
 
@@ -588,7 +600,7 @@ function doSuggest(q) {
   sugItems = res.slice(0, 10); sugSel = -1;
   if (!sugItems.length) { sugg.classList.add("hidden"); return; }
   sugg.innerHTML = sugItems.map(([w, i, note], k) =>
-    `<div data-k="${k}"><b>${w}</b><i>${note || (D.trans[i] || "").split("；")[0].slice(0, 30)}</i><span class="sugband">${BAND_NAMES[D.band[i]]}</span></div>`
+    `<div data-k="${k}"><b>${w}</b><i>${note || (D.trans[i] || "").split("；")[0].slice(0, 30)}</i><span class="sugband" style="color:${bandColor(D.band[i])}">${BAND_NAMES[D.band[i]]}</span></div>`
   ).join("");
   sugg.classList.remove("hidden");
   sugg.querySelectorAll("div").forEach(d => {
@@ -685,10 +697,13 @@ function renderStats() {
      <span class="sw" style="background:#f59e0b;margin-left:6px"></span>学习中
      <span class="sw" style="background:#cbd5e1;margin-left:6px"></span>未学
    </div>
-   <div class="li" style="margin-top:5px;border-top:1px solid #eef2f7;padding-top:5px">
-     <span class="sw" style="background:#db2777"></span>1–3k 词层
-     <span class="sw" style="background:#ca8a04;margin-left:6px"></span>4–6k
-     <span class="sw" style="background:#1e3a8a;margin-left:6px"></span>7–10k
+   <div class="bandblock">
+     <div class="bandramp">
+       ${Array.from({ length: 10 }, (_, k) =>
+         `<span style="background:${BAND_COLORS[k + 1]}" title="${BAND_NAMES[k + 1]} 词层（第 ${BAND_RANGE[k + 1]} 词）"></span>`
+       ).join("")}
+     </div>
+     <div class="bandscale"><span>1k 高频</span><span>← 词频层 →</span><span>10k 低频</span></div>
    </div>
    <div class="li" style="margin-top:5px;border-top:1px solid #eef2f7;padding-top:5px">
      <span class="sw" style="background:#e2e8f0;border:1px solid #cbd5e1"></span>词表外关联词（点开可看释义·听发音）
@@ -730,7 +745,7 @@ function renderMap() {
 
   $("mapSub").textContent = "总体 " + tp + "% · 已掌握 " + tot.mastered;
   let html =
-    '<div class="mrow"><div class="bl">全部<small>10 层合计</small></div>' +
+    '<div class="mrow"><div class="bl">全部<small>10 层</small></div>' +
     '<div class="stack"><div class="m" style="width:' + (tot.total ? tot.mastered / tot.total * 100 : 0) + '%"></div>' +
     '<div class="l" style="width:' + (tot.total ? tot.learned / tot.total * 100 : 0) + '%"></div></div>' +
     '<div class="bnum">掌握 <b>' + tot.mastered + '</b> · 学习中 ' + tot.learned +
@@ -740,7 +755,8 @@ function renderMap() {
     const cls = "brow" + (weak && r.b === weak.b ? " weak" : "");
     html +=
       '<div class="' + cls + '" data-b="' + r.b + '">' +
-      '<div class="bl">' + BAND_NAMES[r.b] + '<small>' + r.total + ' 词</small></div>' +
+      '<div class="bl"><i class="bdot" style="background:' + bandColor(r.b) + '"></i>' +
+      BAND_NAMES[r.b] + '<small>' + r.total + ' 词</small></div>' +
       '<div class="stack"><div class="m" style="width:' + (r.mpct * 100) + '%"></div>' +
       '<div class="l" style="width:' + ((r.pct - r.mpct) * 100) + '%"></div></div>' +
       '<div class="bnum">掌握 <b>' + r.mastered + '</b> · 学习中 ' + r.learned +
