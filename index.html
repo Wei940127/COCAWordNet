@@ -61,6 +61,7 @@
   </div>
 
   <div class="stats" id="stats"></div>
+  <button id="verPill" class="verpill" title="当前版本 · 点一下检查更新">v7</button>
 </header>
 
 <main>
@@ -246,12 +247,112 @@
 <script src="data.js" onerror="window.__DATA_FAIL=1"></script>
 <script src="app.js"></script>
 <script>
-/* PWA: register offline cache (skipped when opened from a local file) */
-if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("sw.js").catch(() => {});
+/* PWA：离线缓存 + 自动更新（用 file:// 直接打开时跳过）
+   为什么需要这一套：iPad 上「添加到主屏幕」的 App 很少主动检查新版本，
+   常常一直跑旧代码。办法是每次启动主动 update()，新版本一接手就自动刷新。 */
+(function () {
+  if (!("serviceWorker" in navigator) || !/^https?:$/.test(location.protocol)) return;
+
+  var pill = document.getElementById("verPill");
+  var VER = window.APP_VERSION || "?";
+  var CHECK_GAP = 5 * 60 * 1000;      /* 5 分钟内不重复检查 */
+  var LAST_KEY = "coca10000.lastcheck";
+  var reg = null, reloading = false;
+  /* 是否已经有「旧版本」在控制本页：只有换版本时才自动刷新，
+     首次安装时的那次接管不刷新（否则每次首访都会白闪一下）。
+     注意这是一个动态标记——首装接管时置位，于是同一页内随后到来的
+     真正新版本仍能触发刷新。 */
+  var seenCtl = !!navigator.serviceWorker.controller;
+
+  function reset() {
+    if (pill) { pill.textContent = VER; pill.className = "verpill"; pill.title = "当前版本 " + VER + " · 点一下检查更新"; }
+  }
+  function setPill(text, cls, title) {
+    if (!pill) return;
+    pill.textContent = text;
+    pill.className = "verpill" + (cls ? " " + cls : "");
+    pill.title = title || "";
+  }
+  function flash(text, cls) { setPill(text, cls, text); setTimeout(reset, 2400); }
+
+  /* 新版 Service Worker 接手后自动刷新一次，用户不必手动重开 */
+  navigator.serviceWorker.addEventListener("controllerchange", function () {
+    if (reloading) return;
+    if (!seenCtl) { seenCtl = true; return; }   /* 首装那次接管，不刷新 */
+    reloading = true;
+    location.reload();
   });
-}
+
+  /* 兜底：清空所有缓存 + 注销 SW，再带时间戳重新加载，绕过一切缓存 */
+  function hardRefresh() {
+    setPill("更新中…", "busy", "正在重新下载最新版");
+    var jobs = [];
+    if (window.caches && caches.keys) {
+      jobs.push(caches.keys().then(function (ks) {
+        return Promise.all(ks.map(function (k) { return caches.delete(k); }));
+      }));
+    }
+    if (navigator.serviceWorker.getRegistrations) {
+      jobs.push(navigator.serviceWorker.getRegistrations().then(function (rs) {
+        return Promise.all(rs.map(function (r) { return r.unregister(); }));
+      }));
+    }
+    Promise.all(jobs).catch(function () {}).then(function () {
+      location.replace(location.pathname + "?v=" + Date.now());
+    });
+  }
+
+  function check(force) {
+    if (!reg) return force ? hardRefresh() : Promise.resolve();
+    setPill("检查中…", "busy", "正在检查更新");
+    return reg.update().then(function () {
+      var w = reg.waiting || reg.installing;
+      if (w) { w.postMessage({ type: "SKIP_WAITING" }); return; }  /* 接手后自动刷新 */
+      if (force) return hardRefresh();
+      flash("已是最新", "ok");
+    }).catch(function () {
+      if (force) hardRefresh(); else flash("检查失败", "err");
+    });
+  }
+
+  function autoCheck() {
+    try {
+      var last = +(localStorage.getItem(LAST_KEY) || 0);
+      if (Date.now() - last < CHECK_GAP) return;
+      localStorage.setItem(LAST_KEY, String(Date.now()));
+    } catch (e) {}
+    check(false);
+  }
+
+  reset();
+  navigator.serviceWorker.register("sw.js", { updateViaCache: "none" })
+    .then(function (r) {
+      reg = r;
+      /* 新版本一旦装好就让它立刻接手（接手后 controllerchange 会自动刷新） */
+      r.addEventListener("updatefound", function () {
+        var w = r.installing;
+        if (!w) return;
+        w.addEventListener("statechange", function () {
+          if (w.state === "installed" && navigator.serviceWorker.controller) {
+            w.postMessage({ type: "SKIP_WAITING" });
+          }
+        });
+      });
+      /* 已经下好、还在等待中的版本 */
+      if (r.waiting) r.waiting.postMessage({ type: "SKIP_WAITING" });
+      autoCheck();
+    })
+    .catch(function () {});
+  window.addEventListener("load", autoCheck);
+  /* 从后台切回前台时也检查一次（主屏幕 App 唤起后常走这条路） */
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible") autoCheck();
+  });
+  if (pill) pill.onclick = function () { check(true); };
+
+  window.COCA_UPDATE = { check: check, hard: hardRefresh, version: VER };
+})();
+
 /* iPad / iPhone Safari: show the "Add to Home Screen" tip once */
 (function () {
   try {

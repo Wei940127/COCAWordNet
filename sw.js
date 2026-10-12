@@ -9,7 +9,7 @@
    Bump CACHE whenever app files or data.js change, so clients pick up the new version. */
 "use strict";
 
-const CACHE = "cocawn-v6";
+const CACHE = "cocawn-v7";
 
 /* Small app shell — must all fit in the install step. */
 const SHELL = [
@@ -58,6 +58,12 @@ self.addEventListener("activate", e => {
     /* Background warm-up: started but not awaited, so activation is instant. */
     WARM.forEach(u => { cacheUrl(u); });
   })());
+});
+
+/* The page asks the new worker to take over immediately so it can reload
+   into the fresh version (iPad home-screen apps rarely update on their own). */
+self.addEventListener("message", e => {
+  if (e.data && e.data.type === "SKIP_WAITING") self.skipWaiting();
 });
 
 self.addEventListener("fetch", e => {
