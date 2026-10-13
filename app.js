@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v15";
+const APP_VERSION = "v16";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -449,7 +449,7 @@ function unproject(sx, sy, z, lvl) {
   return [CX + (sx - CX) / p, CY + Y];
 }
 
-/* ---------- 地面网格 + 每层的“地板”轮廓 ---------- */
+/* ---------- 地面网格（唯一的“平面”提示，很淡） ---------- */
 let gridSegs = [];
 function buildGrid() {
   const W = width(), H = height();
@@ -465,27 +465,13 @@ function buildGrid() {
     exit => exit.remove()
   );
 }
-/* 某一层的“地板”轮廓：世界平面上一个矩形的四条边，投影后是个梯形 */
-function floorPath(lvl) {
-  const W = width(), H = height();
-  const z = -lvl * LVL_GAP;
-  const x0 = 8, x1 = W - 8, y0 = gy0(), y1 = gy1();
-  const pts = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(q => {
-    const r = projXYZ(q[0], q[1], z);
-    return r[0].toFixed(1) + "," + mapY(r[1], lvl).toFixed(1);
-  });
-  return "M" + pts.join("L") + "Z";
-}
-/* 左侧层级标签的文字（paintGrid 里文字和它的白色圆牌要用同一个） */
-const axText = l => isFlat() ? "— 平面视图（上位词·下位词与当前词同层）—"
-  : (l < 0 ? "▲ 上位词" + (l < -1 ? " " + (-l) + " 级" : "") + " · 更抽象"
-    : l > 0 ? "▼ 下位词" + (l > 1 ? " " + l + " 级" : "") + " · 更具体"
-    : "— 当前词所在平面 —");
-/* 粗略估算文字宽度（CJK 按 10.5px、拉丁按 5.6px），够画圆牌底子用 */
-function chipW(s) { let w = 16; for (const ch of s) w += ch.charCodeAt(0) > 255 ? 10.5 : 5.6; return w; }
+/* 左侧层级小标签的文字（不放色块底子，靠 CSS 白描边保证可读） */
+const axText = l => isFlat() ? "平面视图 · 上下位词与当前词同层"
+  : (l < 0 ? "▲ 上位词" + (l < -1 ? " " + (-l) + " 级" : "")
+    : l > 0 ? "▼ 下位词" + (l > 1 ? " " + l + " 级" : "")
+    : "当前词");
 function paintGrid() {
-  /* 网格线：投影后按纵深渐隐 —— 远处的线淡、近处的线实，空间感更强，
-     也比「平均一张坐标纸」干净得多 */
+  /* 网格线：投影后按纵深渐隐 —— 远处的线淡、近处的线实，空间感更强 */
   gGrid.selectAll("line.grid").each(function (seg) {
     const a = projXYZ(seg[0][0], seg[0][1], 0);
     const b = projXYZ(seg[1][0], seg[1][1], 0);
@@ -493,43 +479,19 @@ function paintGrid() {
     d3.select(this)
       .attr("x1", a[0]).attr("y1", mapY(a[1], 0))
       .attr("x2", b[0]).attr("y2", mapY(b[1], 0))
-      .attr("stroke-opacity", 0.10 + 0.30 * t);
+      .attr("stroke-opacity", 0.07 + 0.22 * t);
   });
-  /* 分层带 = 一块块玻璃「搁板」：淡色衬底 + 柔和描边，
-     比光秃秃的虚线框更有质感，也让三个高度一眼可辨。
-     （lower() 把搁板压到网格线下面，网格线才不会被白衬底洗掉） */
+  /* 只留左上角一枚小字标签标明每层含义，不再画搁板/圆牌 */
   const lvls = Array.from(bands.keys());
-  gGrid.selectAll("path.floor").data(lvls, l => l).join(
-    enter => enter.append("path").attr("class", "floor").lower(),
-    update => update,
-    exit => exit.remove()
-  )
-   .attr("fill", l => (l === 0 ? "rgba(255,255,255,0.55)"
-     : l < 0 ? "rgba(139,92,246,0.05)" : "rgba(14,165,233,0.05)"))
-   .attr("stroke", l => (l === 0 ? "#d7e0ec" : l < 0 ? "#c4b5fd" : "#8fd0f4"))
-   .attr("stroke-opacity", 0.55)
-   .attr("stroke-width", 1)
-   .attr("stroke-dasharray", l => (l === 0 ? null : "5 5"))
-   .attr("d", l => floorPath(l));
-  /* 左侧层级标签的白色圆牌底（画在文字下面，文字永远可读） */
-  gGrid.selectAll("rect.axchip").data(lvls, l => l).join(
-    enter => enter.append("rect").attr("class", "axchip")
-      .attr("x", 3).attr("rx", 8).attr("height", 17),
-    update => update,
-    exit => exit.remove()
-  )
-   .attr("y", l => bands.get(l).top + 1)
-   .attr("width", l => chipW(axText(l)))
-   .attr("fill", "rgba(255,255,255,0.88)")
-   .attr("stroke", "#e3e8ef");
   gGrid.selectAll("text.axlbl").data(lvls, l => l).join(
     enter => enter.append("text").attr("class", "axlbl").attr("x", 10).attr("font-size", 10)
       .style("pointer-events", "none"),
     update => update,
     exit => exit.remove()
   )
-   .attr("y", l => bands.get(l).top + 11)
-   .attr("fill", l => (l < 0 ? "#7c3aed" : l > 0 ? "#0284c7" : "#94a3b8"))
+   .attr("y", l => bands.get(l).top + 13)
+   .attr("fill", l => (l < 0 ? "#8b5cf6" : l > 0 ? "#0ea5e9" : "#94a3b8"))
+   .attr("fill-opacity", 0.75)
    .text(l => axText(l));
 }
 

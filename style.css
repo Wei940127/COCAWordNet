@@ -112,8 +112,8 @@ main { flex: 1; display: flex; min-height: 0; }
 /* 左侧层级标签：加粗 + 同样的白描边，浮在圆牌上 */
 #graph text.axlbl { font-weight: 700; letter-spacing: .3px;
   paint-order: stroke; stroke: rgba(255,255,255,.9); stroke-width: 3px; stroke-linejoin: round; }
-/* 圆牌 / 搁板不拦截鼠标，缩放平移照常 */
-#graph rect.axchip, #graph path.floor { pointer-events: none; }
+/* 层级小标签不拦截鼠标，缩放平移照常 */
+#graph text.axlbl { pointer-events: none; }
 /* 当前词的旋转虚线环 */
 #graph circle.ring { animation: ringspin 7s linear infinite; }
 @keyframes ringspin { to { stroke-dashoffset: -100; } }
