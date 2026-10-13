@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v12";
+const APP_VERSION = "v13";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -35,6 +35,29 @@ const REL = [
 const RMAP = {}; REL.forEach(r => RMAP[r.t] = r);
 /* keep the strongest relation type when a pair has several */
 const TYPE_PRIORITY = [4, 1, 0, 2, 3, 5, 6];
+
+/* ---------- 立体布局：语义高度 ----------
+   让词网从「平面」变成「立体」：上位词（更抽象）悬浮在当前词所在平面的上方，
+   下位词（更具体）垂到平面下方，其余关系（同义词 / 反义词 / 同族派生 /
+   近义联想 / 语义相关）与当前词同处一个平面。
+
+   实现上只给每个节点一个**层级 lvl**（0 = 平面，负 = 向上，正 = 向下），
+   平面内的 x / y 仍然交给原来的力导向排布 —— 排布质量和原来一样，
+   但抽象层级从此一眼可见。渲染时再做一次倾斜透视投影。 */
+const LVL_MAX = 2;            // 上下各最多两层，再远的层级都夹到这里（再多画布放不下）
+const TILT_KEY = "coca10000.tilt";
+const TILT_MAX = 75;          // 视角滑块上限（度）
+/* 默认 55°：既看得见平面，也看得清高低；0° = 完全俯视（就是原来的平面视图） */
+let tiltDeg = 55;
+try {
+  const saved = localStorage.getItem(TILT_KEY);
+  if (saved != null && !isNaN(+saved)) tiltDeg = Math.max(0, Math.min(TILT_MAX, +saved));
+} catch (e) {}
+let tilt = tiltDeg * Math.PI / 180;
+let LVL_GAP = 50;             // 每层在世界坐标里的垂直高度（会按画布高度自适应）
+let CX = 0, CY = 0;           // 世界原点 = 画布中心
+const FOC = 1200;             // 透视焦距，越小透视越夸张
+const PS_MIN = 0.84, PS_MAX = 1.28;
 
 /* ---------- mastery store ---------- */
 const LS = "coca10000.progress.v1";
@@ -81,6 +104,9 @@ function nodeWord(kind, i) { return kind === "w" ? D.words[i] : D.extra[i]; }
 /* ---------- svg setup ---------- */
 const svg = d3.select("#graph");
 const g = svg.append("g");
+/* 立体视图的分层（从下往上）：地面网格 → 悬浮投影柱 → 连线 → 节点 → 标签 */
+const gGrid = g.append("g").attr("class", "grid");
+const gStalks = g.append("g").attr("class", "stalks");
 const gLinks = g.append("g");
 gLinks.attr("filter", "url(#fwGlow)");
 const gNodes = g.append("g");
@@ -108,6 +134,7 @@ function ensureNode(kind, i, dist) {
   let n = nodeMap.get(id);
   if (n) { n.dist = Math.min(n.dist, dist); return n; }
   n = { id, kind, i, dist, expanded: false,
+        lvl: 0,          /* 语义高度：负=上位（更抽象），正=下位（更具体） */
         word: nodeWord(kind, i),
         band: kind === "w" ? D.band[i] : 0 };
   nodes.push(n); nodeMap.set(id, n);
@@ -162,6 +189,44 @@ function rebuildLinkSet() {
   links.forEach(l => linkSet.add(l.source.id + "|" + l.target.id + "|" + l.t));
 }
 
+/* 上位词/下位词这条边会让语义高度 ±1，其余关系不改变高度 */
+function lvlDelta(t, reverse) {
+  if (t === 2) return reverse ? 1 : -1;    /* 上位词 → 更抽象 → 往上 */
+  if (t === 3) return reverse ? -1 : 1;    /* 下位词 → 更具体 → 往下 */
+  return 0;
+}
+
+/* 从当前词出发做 BFS，给全图推一遍「语义高度」：
+   直接关系优先（最短路径），上位词边 -1、下位词边 +1、其余关系不变 ——
+   天然满足“上位词在上面、下位词在下面、其余关系留在同一个平面”。 */
+function assignLevels() {
+  nodes.forEach(n => { n.lvl = 0; });
+  if (current === null) return;
+  const adj = new Map();
+  links.forEach(l => {
+    const a = l.source.id, b = l.target.id;
+    if (!adj.has(a)) adj.set(a, []);
+    if (!adj.has(b)) adj.set(b, []);
+    adj.get(a).push([b, l.t, false]);
+    adj.get(b).push([a, l.t, true]);   /* 反向走时上下位互换 */
+  });
+  const start = "w:" + current;
+  const best = new Map([[start, 0]]);
+  const q = [start];
+  let guard = 0;
+  while (q.length && guard++ < 40000) {
+    const id = q.shift();
+    const base = best.get(id);
+    (adj.get(id) || []).forEach(([nb, t, rev]) => {
+      if (best.has(nb)) return;   /* 最短路径（直接关系）优先 */
+      let v = Math.max(-LVL_MAX, Math.min(LVL_MAX, base + lvlDelta(t, rev)));
+      best.set(nb, v);
+      q.push(nb);
+    });
+  }
+  nodes.forEach(n => { const v = best.get(n.id); if (v !== undefined) n.lvl = v; });
+}
+
 function expand(i, opts) {
   opts = opts || {};
   const me = ensureNode("w", i, 0);
@@ -184,6 +249,7 @@ function expand(i, opts) {
   me.expanded = true;
   current = i;
   prune();
+  assignLevels();
   if (opts.reset) {
     const c = g.select("#" + cssId(me.id));
     if (!c.empty()) {
@@ -210,6 +276,7 @@ function focusCurrent() {
   me.dist = 0;
   links = links.filter(l => l.source === me || l.target === me);
   rebuildLinkSet();
+  assignLevels();
   startSim();
 }
 
@@ -219,6 +286,8 @@ function clearGraph() {
   gLinks.selectAll("*").remove();
   gNodes.selectAll("*").remove();
   gLabels.selectAll("*").remove();
+  gStalks.selectAll("*").remove();
+  paint();
   if (sim) sim.stop();
   document.getElementById("emptyState").classList.remove("hidden");
   document.getElementById("detail").classList.add("hidden");
@@ -237,7 +306,234 @@ function nodeFill(d) {
   return s === 2 ? "#16a34a" : s === 1 ? "#f59e0b" : "#cbd5e1";
 }
 
-let nodeSel = null, linkSel = null, labelSel = null;
+let nodeSel = null, linkSel = null, labelSel = null, stalkSel = null;
+
+/* ---------- 立体投影：分层带（strata） ----------
+   世界坐标：X 向右、Y 在平面内向下、Z 向上（= 语义高度）。
+
+   为什么不是「把整张平面倾斜一下」了事：斜着看平面时，平面自身的纵向跨度
+   （画布高度的量级）远大于层与层之间的落差，平面前排的节点会比后排的上位词
+   还低 —— 那样「上位词在上面」根本读不出来。
+
+   所以改成**分层带**：
+     · 每个语义层级（0 / ±1 / ±2）占一条水平带，带高按该层节点数分配，互不重叠；
+       于是「上位词一定在平面之上、下位词一定在平面之下」是结构性保证的；
+     · 带内仍按透视投影排布（近大远小、网格收敛），立体感来自投影而非错位；
+     · tilt 控制透视的倾斜程度：0° = 正俯视（层与层只是上下两条并列的带）。
+   每个层级还有一个仿射系数 (a,b)，把该层投影后的纵向范围铺满自己的带。 */
+function projXYZ(x, y, z) {
+  const st = Math.sin(tilt), ct = Math.cos(tilt);
+  const X = x - CX, Y = y - CY;
+  const depth = Y * st + z * ct;
+  let p = FOC / (FOC + depth);
+  if (p < PS_MIN) p = PS_MIN; else if (p > PS_MAX) p = PS_MAX;
+  return [CX + X * p, CY + (Y * ct - z * st) * p, p];
+}
+/* 世界坐标里 Z 正方向朝上，而 lvl 是「负 = 上位」——所以这里取反 */
+const lvlZ = d => -(d.lvl || 0) * LVL_GAP;
+
+/* ---------- 分层带 ---------- */
+let bands = new Map();          // lvl -> { top, h, bottom, a, b }
+const BAND_MT = 62, BAND_MB = 52;
+/* 平面（世界坐标）的纵向范围 —— 分层带的仿射、网格、地板、节点夹取都用它，
+   必须一致，否则节点会被映射到带外。 */
+const gy0 = () => BAND_MT - 22, gy1 = () => height() - BAND_MB + 22;
+const FLAT_DEG = 8;             // 视角低于这个度数就当作原来的平面视图
+const isFlat = () => tiltDeg < FLAT_DEG;
+/* 平面视图下所有层级合并到一条带里（= 原来的样子），立体视角下才分层 */
+const bandKey = lvl => (isFlat() || !bands.has(lvl) ? 0 : lvl);
+
+function buildBands() {
+  const H = height();
+  const avail = H - BAND_MT - BAND_MB;
+  const counts = new Map();
+  nodes.forEach(n => {
+    const k = isFlat() ? 0 : (n.lvl || 0);
+    counts.set(k, (counts.get(k) || 0) + 1);
+  });
+  bands = new Map();
+  if (!counts.size || avail <= 0) return;
+  const lvls = Array.from(counts.keys()).sort((x, y) => x - y);   // 上位词（负）排在最前
+  const gap = lvls.length > 1 ? Math.min(18, avail * 0.022) : 0;
+  const weights = lvls.map(l => 2 + Math.sqrt(counts.get(l)));
+  const sumW = weights.reduce((x, y) => x + y, 0);
+  const usable = avail - gap * (lvls.length - 1);
+  let top = BAND_MT;
+  lvls.forEach((l, k) => {
+    const h = usable * weights[k] / sumW;
+    bands.set(l, { top: top, h: h, bottom: top + h, a: 1, b: 0 });
+    top += h + gap;
+  });
+  /* 每个层的仿射：把该层在参考平面上的投影纵向范围 [ry0, ry1] 铺满自己的带 */
+  bands.forEach((bd, l) => {
+    const z = -l * LVL_GAP;
+    const ry0 = ryOf(gy0() - CY, z), ry1 = ryOf(gy1() - CY, z);
+    const span = (ry1 - ry0) || 1;
+    bd.a = (bd.h - 14) / span;
+    bd.b = bd.top + 7 - bd.a * ry0;
+  });
+}
+function ryOf(Y, z) {
+  const st = Math.sin(tilt), ct = Math.cos(tilt);
+  const depth = Y * st + z * ct;
+  let p = FOC / (FOC + depth);
+  if (p < PS_MIN) p = PS_MIN; else if (p > PS_MAX) p = PS_MAX;
+  return CY + (Y * ct - z * st) * p;
+}
+/* 投影后的纵向坐标 → 该层带内的画面纵向坐标 */
+function mapY(ry, lvl) {
+  const bd = bands.get(lvl || 0);
+  return bd ? bd.a * ry + bd.b : ry;
+}
+function project(d) {
+  const r = projXYZ(d.x == null ? CX : d.x, d.y == null ? CY : d.y, lvlZ(d));
+  d.px = r[0]; d.py = mapY(r[1], bandKey(d.lvl || 0)); d.ps = r[2];
+}
+/* 拖拽用：把画面坐标反推回平面坐标（迭代几轮就收敛） */
+function unproject(sx, sy, z, lvl) {
+  const bd = bands.get(lvl || 0);
+  const ry = bd ? (sy - bd.b) / (bd.a || 1) : sy;
+  const st = Math.sin(tilt), ct = Math.cos(tilt) || 1e-6;
+  let p = 1, Y = 0;
+  for (let k = 0; k < 6; k++) {
+    Y = ((ry - CY) / p + z * st) / ct;
+    p = FOC / (FOC + (Y * st + z * ct));
+    if (p < PS_MIN) p = PS_MIN; else if (p > PS_MAX) p = PS_MAX;
+  }
+  return [CX + (sx - CX) / p, CY + Y];
+}
+
+/* ---------- 地面网格 + 每层的“地板”轮廓 ---------- */
+let gridSegs = [];
+function buildGrid() {
+  const W = width(), H = height();
+  const step = 74, pad = 8;
+  const x0 = pad, x1 = W - pad, y0 = gy0(), y1 = gy1();
+  gridSegs = [];
+  for (let x = x0; x <= x1 + 0.5; x += step) gridSegs.push([[x, y0], [x, y1]]);
+  for (let y = y0; y <= y1 + 0.5; y += step) gridSegs.push([[x0, y], [x1, y]]);
+  gGrid.selectAll("line.grid").data(gridSegs).join(
+    enter => enter.append("line").attr("class", "grid")
+      .attr("stroke", "#cbd5e1").attr("stroke-width", 0.7).attr("stroke-opacity", 0.5),
+    update => update,
+    exit => exit.remove()
+  );
+}
+/* 某一层的“地板”轮廓：世界平面上一个矩形的四条边，投影后是个梯形 */
+function floorPath(lvl) {
+  const W = width(), H = height();
+  const z = -lvl * LVL_GAP;
+  const x0 = 8, x1 = W - 8, y0 = gy0(), y1 = gy1();
+  const pts = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(q => {
+    const r = projXYZ(q[0], q[1], z);
+    return r[0].toFixed(1) + "," + mapY(r[1], lvl).toFixed(1);
+  });
+  return "M" + pts.join("L") + "Z";
+}
+function paintGrid() {
+  gGrid.selectAll("line.grid").each(function (seg) {
+    const a = projXYZ(seg[0][0], seg[0][1], 0);
+    const b = projXYZ(seg[1][0], seg[1][1], 0);
+    d3.select(this).attr("x1", a[0]).attr("y1", mapY(a[1], 0))
+      .attr("x2", b[0]).attr("y2", mapY(b[1], 0));
+  });
+  /* 每层的地板 + 左侧层级标签 */
+  const lvls = Array.from(bands.keys());
+  gGrid.selectAll("path.floor").data(lvls, l => l).join(
+    enter => enter.insert("path").attr("class", "floor")
+      .attr("fill", "none").attr("stroke-width", 1).attr("stroke-opacity", 0.5),
+    update => update,
+    exit => exit.remove()
+  ).attr("stroke", l => (l === 0 ? "#cbd5e1" : "#dbe3ee"))
+   .attr("stroke-dasharray", l => (l === 0 ? null : "3 4"))
+   .attr("d", l => floorPath(l));
+  gGrid.selectAll("text.axlbl").data(lvls, l => l).join(
+    enter => enter.append("text").attr("class", "axlbl").attr("x", 10).attr("font-size", 10)
+      .style("pointer-events", "none"),
+    update => update,
+    exit => exit.remove()
+  )
+   .attr("y", l => bands.get(l).top + 11)
+   .attr("fill", l => (l < 0 ? "#7c3aed" : l > 0 ? "#0284c7" : "#94a3b8"))
+   .text(l => isFlat() ? "— 平面视图（上位词·下位词与当前词同层）—"
+     : (l < 0 ? "▲ 上位词" + (l < -1 ? " " + (-l) + " 级" : "") + " · 更抽象"
+       : l > 0 ? "▼ 下位词" + (l > 1 ? " " + l + " 级" : "") + " · 更具体"
+       : "— 当前词所在平面 —"));
+}
+
+/* 越高/越低的层颜色越淡，帮助分辨高低（平面视图下不淡化） */
+const lvlOpacity = lvl =>
+  (lvl === 0 || isFlat() ? 1 : Math.max(0.55, 0.88 - (Math.abs(lvl) - 1) * 0.14));
+
+/* 把模拟出来的平面坐标投到画面上：连线、节点、标签、投影柱全部在这里更新 */
+function paint() {
+  const W = width(), H = height();
+  CX = W / 2; CY = H / 2;
+  /* 层间距：只影响层间的透视缩放与投影柱长度，层级本身的上下由分层带保证 */
+  LVL_GAP = Math.max(46, Math.min(96, H * 0.10));
+
+  /* 空画布上只留干净的背景 */
+  if (!nodes.length) {
+    bands = new Map();
+    gGrid.attr("display", "none");
+    gStalks.attr("display", "none");
+    return;
+  }
+  gGrid.attr("display", null);
+  /* 平面视图下没有高低差，投影柱没有意义 */
+  gStalks.attr("display", isFlat() ? "none" : null);
+
+  const mx = 42, lo = gy0(), hi = gy1();
+  nodes.forEach(d => {
+    if (d.x == null || d.y == null) return;
+    if (d.x < mx) d.x = mx; else if (d.x > W - mx) d.x = W - mx;
+    if (d.y < lo) d.y = lo; else if (d.y > hi) d.y = hi;
+  });
+  buildBands();
+  nodes.forEach(d => {
+    project(d);
+    if (d.px < mx) d.px = mx; else if (d.px > W - mx) d.px = W - mx;
+  });
+
+  paintGrid();
+
+  /* 投影柱：非平面上的节点垂一条虚线到主平面，立体感的关键 */
+  stalkSel = gStalks.selectAll("line").data(nodes.filter(n => n.lvl), n => n.id);
+  stalkSel.exit().remove();
+  stalkSel = stalkSel.enter().append("line")
+    .attr("stroke", "#94a3b8").attr("stroke-width", 1)
+    .attr("stroke-opacity", 0.32).attr("stroke-dasharray", "2 3")
+    .merge(stalkSel);
+  stalkSel.each(function (d) {
+    const a = projXYZ(d.x, d.y, lvlZ(d));
+    const b = projXYZ(d.x, d.y, 0);
+    d3.select(this).attr("x1", a[0]).attr("y1", mapY(a[1], bandKey(d.lvl || 0)))
+      .attr("x2", b[0]).attr("y2", mapY(b[1], 0));
+  });
+
+  if (linkSel) linkSel
+    .attr("x1", l => l.source.px).attr("y1", l => l.source.py)
+    .attr("x2", l => l.target.px).attr("y2", l => l.target.py)
+    .attr("stroke-opacity", l => {
+      const base = l.t === 6 ? 0.35 : 0.6;
+      const k = ((l.source.ps || 1) + (l.target.ps || 1)) / 2;
+      return Math.min(1, base * (0.5 + 0.62 * k));
+    })
+    .attr("stroke-width", l => {
+      const w = l.t === 4 ? 2.3 : l.t === 6 ? 1 : 1.8;
+      const k = ((l.source.ps || 1) + (l.target.ps || 1)) / 2;
+      return w * Math.max(0.7, Math.min(1.35, k));
+    });
+  if (nodeSel) nodeSel
+    .attr("transform", d => "translate(" + d.px + "," + d.py + ") scale(" + (d.ps || 1) + ")")
+    .attr("opacity", d => lvlOpacity(d.lvl || 0));
+  if (labelSel) labelSel
+    .attr("x", d => d.px)
+    .attr("y", d => d.py + radius(d) * (d.ps || 1) + 12)
+    .attr("font-size", d => (d.kind === "x" ? 10 : d.id === "w:" + current ? 14 : 11) *
+      Math.max(0.86, Math.min(1.16, (d.ps || 1) * 0.75 + 0.25)))
+    .attr("opacity", d => lvlOpacity(d.lvl || 0));
+}
 
 function draw() {
   nodeSel = gNodes.selectAll("g.node").data(nodes, d => d.id);
@@ -246,7 +542,9 @@ function draw() {
     .attr("id", d => cssId(d.id))
     .call(d3.drag()
       .on("start", (e, d) => { if (!e.active) sim.alphaTarget(0.25).restart(); d.fx = d.x; d.fy = d.y; })
-      .on("drag", (e, d) => { d.fx = e.x; d.fy = e.y; })
+      /* 鼠标位置是**投影后**的画面坐标，斜视角下不能直接当作平面坐标：
+         先反投影回平面，否则拖动起来会“跟不上手”。 */
+      .on("drag", (e, d) => { const c = unproject(e.x, e.y, lvlZ(d), d.lvl); d.fx = c[0]; d.fy = c[1]; })
       .on("end", (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null; }));
 
   enter.append("circle")
@@ -266,6 +564,9 @@ function draw() {
     .style("pointer-events", "all");
 
   const all = enter.merge(nodeSel);
+  /* paint() 每帧按投影结果摆位置，必须拿到**合并后**的选择集，
+     否则这一帧新加进来的节点不会被摆上去。 */
+  nodeSel = all;
   all.select("circle.vis")
     .attr("r", radius)
     .attr("fill", nodeFill)
@@ -316,31 +617,16 @@ function draw() {
     .style("pointer-events", "none")
     .merge(labelSel);
   labelSel
-    .attr("x", d => (d.x == null ? 0 : d.x))
-    .attr("y", d => (d.y == null ? 0 : d.y + radius(d) + 12))
-    .attr("font-size", d => (d.kind === "x" ? 10 : d.id === "w:" + current ? 14 : 11))
     .attr("fill", d => (d.kind === "x" ? "#64748b" : "#334155"))
     .text(d => d.word);
 
+  buildGrid();
+  paintGrid();
+  paint();
+
   /* sim 只有在展开过词之后才存在：空画布上合并进度时 draw() 会被直接调用，
      这里必须判空，否则整段刷新会中断。 */
-  if (sim) sim.on("tick", () => {
-    /* 把节点约束在可视范围内（留出工具栏 / 图例 / 标签的边距），
-       这样任何一条线的端点都一定在画面里，不会出现“线头伸到屏幕外、
-       端点找不到单词”的情况。 */
-    const W = width(), H = height();
-    const mx = 48, mt = 72, mb = 58;
-    nodes.forEach(d => {
-      if (d.x == null || d.y == null) return;
-      if (d.x < mx) d.x = mx; else if (d.x > W - mx) d.x = W - mx;
-      if (d.y < mt) d.y = mt; else if (d.y > H - mb) d.y = H - mb;
-    });
-    linkSel.attr("x1", l => l.source.x).attr("y1", l => l.source.y)
-           .attr("x2", l => l.target.x).attr("y2", l => l.target.y);
-    all.attr("transform", d => `translate(${d.x},${d.y})`);
-    labelSel.attr("x", d => (d.x == null ? 0 : d.x))
-            .attr("y", d => (d.y == null ? 0 : d.y + radius(d) + 12));
-  });
+  if (sim) sim.on("tick", paint);
 }
 
 svg.on("click", () => { document.getElementById("sugg").classList.add("hidden"); });
@@ -845,9 +1131,11 @@ function renderStats() {
 /* ---------- legend ---------- */
 (function legend() {
   const el = $("legend");
-  el.innerHTML = REL.map(r =>
-    `<div class="li"><span class="sw" style="background:${r.color}"></span>${r.name}</div>`
-  ).join("") +
+  el.innerHTML = REL.map(r => {
+    /* 上位词/下位词在立体视图里是有方向的：↑ 往上、↓ 往下 */
+    const arrow = r.t === 2 ? " ↑" : r.t === 3 ? " ↓" : "";
+    return `<div class="li"><span class="sw" style="background:${r.color}"></span>${r.name}${arrow}</div>`;
+  }).join("") +
   `<div class="li" style="margin-top:5px;border-top:1px solid #eef2f7;padding-top:5px">
      <span class="sw" style="background:#16a34a"></span>已掌握
      <span class="sw" style="background:#f59e0b;margin-left:6px"></span>学习中
@@ -863,7 +1151,8 @@ function renderStats() {
    </div>
    <div class="li" style="margin-top:5px;border-top:1px solid #eef2f7;padding-top:5px">
      <span class="sw" style="background:#e2e8f0;border:1px solid #cbd5e1"></span>词表外关联词（点开可看释义·听发音）
-   </div>`;
+   </div>
+   <div class="li" style="color:#94a3b8">↑ 上位词悬在上方 · ↓ 下位词沉在下方 · 其余关系同一平面</div>`;
 })();
 
 /* ---------- progress map ---------- */
@@ -1186,6 +1475,36 @@ $("impBtn").onclick = () => {
   inp.click();
 };
 
+/* ---------- 视角控制（平面 ⇄ 立体） ---------- */
+function applyTilt(deg, save) {
+  tiltDeg = Math.max(0, Math.min(TILT_MAX, deg));
+  tilt = tiltDeg * Math.PI / 180;
+  const el = $("tilt");
+  if (el && +el.value !== Math.round(tiltDeg)) el.value = String(Math.round(tiltDeg));
+  const v = $("tiltVal");
+  if (v) v.textContent = Math.round(tiltDeg) + "°";
+  const tbtn = $("tiltToggle");
+  if (tbtn) {
+    tbtn.textContent = isFlat() ? "平面" : "立体";
+    tbtn.classList.toggle("on", !isFlat());
+  }
+  if (save) { try { localStorage.setItem(TILT_KEY, String(Math.round(tiltDeg))); } catch (e) {} }
+  if (!gridSegs.length) buildGrid();
+  paintGrid();
+  paint();
+}
+(function initTilt() {
+  const el = $("tilt");
+  if (el) {
+    el.addEventListener("input", () => applyTilt(+el.value, false));
+    el.addEventListener("change", () => applyTilt(+el.value, true));
+    el.addEventListener("pointerup", () => applyTilt(+el.value, true));
+  }
+  const b = $("tiltToggle");
+  if (b) b.onclick = () => applyTilt(isFlat() ? 55 : 0, true);
+  applyTilt(tiltDeg, false);
+})();
+
 /* ---------- toolbar events ---------- */
 $("nextBtn").onclick = nextWord;
 $("focusBtn").onclick = focusCurrent;
@@ -1203,6 +1522,7 @@ document.addEventListener("keydown", e => {
   if (e.key === "n" || e.key === "N") nextWord();
   if (e.key === "f" || e.key === "F") focusCurrent();
   if (e.key === "p" || e.key === "P") speakCurrent();
+  if (e.key === "v" || e.key === "V") applyTilt(isFlat() ? 55 : 0, true);
   if (e.key === "m" || e.key === "M") { renderMap(); $("mapModal").classList.remove("hidden"); }
   if (e.key === "l" || e.key === "L") {
     if ($("listModal").classList.contains("hidden")) { renderList(true); $("listModal").classList.remove("hidden"); }
@@ -1210,7 +1530,10 @@ document.addEventListener("keydown", e => {
   }
 });
 
-window.addEventListener("resize", () => { if (sim) { sim.force("center", d3.forceCenter(width() / 2, height() / 2)); sim.alpha(0.3).restart(); } });
+window.addEventListener("resize", () => {
+  if (sim) { sim.force("center", d3.forceCenter(width() / 2, height() / 2)); sim.alpha(0.3).restart(); }
+  buildGrid(); paintGrid(); paint();
+});
 
 /* ---------- boot ---------- */
 const _loader = document.getElementById("loader");

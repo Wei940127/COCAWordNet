@@ -61,7 +61,7 @@
   </div>
 
   <div class="stats" id="stats"></div>
-  <button id="verPill" class="verpill" title="当前版本 · 点一下检查更新">v12</button>
+  <button id="verPill" class="verpill" title="当前版本 · 点一下检查更新">v13</button>
 </header>
 
 <main>
@@ -70,7 +70,7 @@
       <button id="focusBtn" class="btn" title="清除其他节点，只看当前词的关系">◎ 聚焦当前词</button>
       <button id="clearBtn" class="btn" title="清空画布">✕ 清空</button>
       <span id="trail" class="trail"></span>
-      <span class="hint">点击任意节点：听发音 + 看音标和释义 · 灰色小点=词表外词 · 滚轮缩放 · 拖拽平移</span>
+      <span class="hint">点击任意节点：听发音 + 看音标和释义 · 上位词在上、下位词在下（拖右下「视角」可旋转）· 灰色小点=词表外词 · 滚轮缩放 · 拖拽平移</span>
     </div>
     <svg id="graph"><defs>
       <filter id="fwGlow" x="-30%" y="-30%" width="160%" height="160%">
@@ -79,6 +79,13 @@
       </filter>
     </defs></svg>
     <div id="legend" class="legend"></div>
+    <!-- 视角：0° = 平面俯视，越大越立体 -->
+    <div class="tiltbox">
+      <span class="tlabel">视角</span>
+      <input id="tilt" type="range" min="0" max="75" step="1" value="55" title="拖动旋转观察角度：0° 为平面俯视，越大越立体">
+      <span id="tiltVal" class="tval">55°</span>
+      <button id="tiltToggle" class="tbtn" title="在「平面视图」和「立体视图」之间切换（快捷键 V）">立体</button>
+    </div>
     <div id="tooltip" class="tooltip hidden"></div>
     <div id="emptyState" class="empty">
       <div class="emptyCard">
