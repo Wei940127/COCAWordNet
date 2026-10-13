@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v17";
+const APP_VERSION = "v18";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -1169,28 +1169,51 @@ function renderStats() {
 /* ---------- legend ---------- */
 (function legend() {
   const el = $("legend");
-  el.innerHTML = REL.map(r => {
-    /* 上位词/下位词在立体视图里是有方向的：↑ 往上、↓ 往下 */
-    const arrow = r.t === 2 ? " ↑" : r.t === 3 ? " ↓" : "";
-    return `<div class="li"><span class="sw" style="background:${r.color}"></span>${r.name}${arrow}</div>`;
-  }).join("") +
-  `<div class="li" style="margin-top:5px;border-top:1px solid #eef2f7;padding-top:5px">
-     <span class="sw" style="background:#16a34a"></span>已掌握
-     <span class="sw" style="background:#f59e0b;margin-left:6px"></span>学习中
-     <span class="sw" style="background:#cbd5e1;margin-left:6px"></span>未学
-   </div>
-   <div class="bandblock">
-     <div class="bandramp">
-       ${Array.from({ length: 10 }, (_, k) =>
-         `<span style="background:${BAND_COLORS[k + 1]}" title="${BAND_NAMES[k + 1]} 词层（第 ${BAND_RANGE[k + 1]} 词）"></span>`
-       ).join("")}
+  const LG_KEY = "cocawn.legend.mini";
+  el.innerHTML =
+    `<div class="lghd"><span class="lgt">图例</span>` +
+    `<button class="lgbtn" id="lgBtn" type="button" title="收起图例">−</button></div>` +
+    `<div class="lgbd">` +
+    REL.map(r => {
+      /* 上位词/下位词在立体视图里是有方向的：↑ 往上、↓ 往下 */
+      const arrow = r.t === 2 ? " ↑" : r.t === 3 ? " ↓" : "";
+      return `<div class="li"><span class="sw" style="background:${r.color}"></span>${r.name}${arrow}</div>`;
+    }).join("") +
+    `<div class="li" style="margin-top:5px;border-top:1px solid #eef2f7;padding-top:5px">
+       <span class="sw" style="background:#16a34a"></span>已掌握
+       <span class="sw" style="background:#f59e0b;margin-left:6px"></span>学习中
+       <span class="sw" style="background:#cbd5e1;margin-left:6px"></span>未学
      </div>
-     <div class="bandscale"><span>1k 高频</span><span>← 词频层 →</span><span>10k 低频</span></div>
-   </div>
-   <div class="li" style="margin-top:5px;border-top:1px solid #eef2f7;padding-top:5px">
-     <span class="sw" style="background:#e2e8f0;border:1px solid #cbd5e1"></span>词表外关联词（点开可看释义·听发音）
-   </div>
-   <div class="li" style="color:#94a3b8">↑ 上位词悬浮上方（紫环）· ↓ 下位词沉在下方（青环）· 其余关系同一平面</div>`;
+     <div class="bandblock">
+       <div class="bandramp">
+         ${Array.from({ length: 10 }, (_, k) =>
+           `<span style="background:${BAND_COLORS[k + 1]}" title="${BAND_NAMES[k + 1]} 词层（第 ${BAND_RANGE[k + 1]} 词）"></span>`
+         ).join("")}
+       </div>
+       <div class="bandscale"><span>1k 高频</span><span>← 词频层 →</span><span>10k 低频</span></div>
+     </div>
+     <div class="li" style="margin-top:5px;border-top:1px solid #eef2f7;padding-top:5px">
+       <span class="sw" style="background:#e2e8f0;border:1px solid #cbd5e1"></span>词表外关联词（点开可看释义·听发音）
+     </div>
+     <div class="li" style="color:#94a3b8">↑ 上位词悬浮上方（紫环）· ↓ 下位词沉在下方（青环）· 其余关系同一平面</div>` +
+    `</div>`;
+
+  const btn = el.querySelector("#lgBtn");
+  const apply = mini => {
+    el.classList.toggle("mini", mini);
+    btn.textContent = mini ? "+" : "−";
+    btn.title = mini ? "展开图例" : "收起图例";
+    btn.setAttribute("aria-expanded", String(!mini));
+  };
+  let mini = false;
+  try { mini = localStorage.getItem(LG_KEY) === "1"; } catch (e) {}
+  apply(mini);
+  btn.addEventListener("click", ev => {
+    ev.stopPropagation();
+    mini = !mini;
+    apply(mini);
+    try { localStorage.setItem(LG_KEY, mini ? "1" : "0"); } catch (e) {}
+  });
 })();
 
 /* ---------- progress map ---------- */
