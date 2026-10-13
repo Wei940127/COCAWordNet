@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v11";
+const APP_VERSION = "v12";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -393,23 +393,30 @@ if ("speechSynthesis" in window) {
 }
 function speakLocal(word) {
   if (!("speechSynthesis" in window)) return;
-  speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(word);
   u.lang = "en-US";
   u.rate = 0.85;
   if (US_VOICE) u.voice = US_VOICE;
-  speechSynthesis.speak(u);
+  /* 这里**不要**再 cancel 一次：speak() 开头已经处理过打断，
+     同一 tick 里 cancel()+speak() 连调会让 Chrome / iOS 把这次朗读吞掉。 */
+  try { speechSynthesis.speak(u); } catch (e) {}
 }
 
 /* ---- 发音音源 ----
-   有道真人音（type=2 美音）覆盖全部单字，但**搭配短语里约 66% 它没有音频**，
-   这种情况它返回 HTTP 500（内容是 JSON 不是 mp3），<audio> 会立刻 error。
+   ① 有道真人音（type=2 美音）：单字几乎全有，但**短语约 55% 它没有音频**，
+      这种情况它返回 HTTP 500（内容是 JSON 不是 mp3），<audio> 立刻报错（媒体错误码 4）。
+   ② ResponsiveVoice 的 en-US 语音（默认的 g1 = Google 美音）：
+      **任意文本都能读**，实测 42 条真实搭配 42 条成功、350–900ms。
+      它同样是普通的 <audio> 网络音频，所以 iPad 上也能出声。
+   ③ 浏览器本地语音合成：离线兜底。
 
-   关键：不能等"播放失败"再异步回退到浏览器 TTS —— 那已经脱离用户手势，
-   iOS 会静默丢弃这次朗读（电脑上则容易被 cancel()+speak() 连调两次打断）。
-   所以改成**面板渲染时先探测**（只读音频元数据，很轻），结果缓存起来；
-   点击时就能同步决定：有真人音 → 播真人音；没有 → 直接本地 TTS。 */
+   关键：音源顺序在**点击那一刻同步决定**（用已缓存的探测结果），
+   因为 iOS 只认用户手势 —— 等播放失败再异步回退，iOS 会静默丢帧、什么也听不到。
+   所以：已知没有真人音的短语 → 直接用 ②；没探测过的短语 → 也用 ②（反向概率低）。 */
 const YOUDAO_VOICE = w => "https://dict.youdao.com/dictvoice?audio=" + encodeURIComponent(w) + "&type=2";
+/* sv=g1 是唯一在浏览器里可用的高质量美音（m1/m2/f1/f2/默认值都返回空音频） */
+const RV_VOICE = w => "https://code.responsivevoice.org/getvoice.php?t=" + encodeURIComponent(w) +
+  "&tl=en-US&sv=g1&vn=&pitch=0.5&rate=0.5&vol=1";
 const HAS_DICT_KEY = "coca10000.hasdict.v1";
 const PROBE_FRESH = 7 * 24 * 3600 * 1000;   /* 探测结果 7 天内有效 */
 
@@ -470,39 +477,57 @@ function speak(word, btnEl) {
   };
 
   if (curAudio) { try { curAudio.pause(); } catch (e) {} curAudio = null; }
-  if ("speechSynthesis" in window) { try { speechSynthesis.cancel(); } catch (e) {} }
+  /* 只在**真的正在朗读**时才打断：无事发生时的 cancel() 紧接 speak() 会被浏览器吞掉 */
+  if ("speechSynthesis" in window && (speechSynthesis.speaking || speechSynthesis.pending)) {
+    try { speechSynthesis.cancel(); } catch (e) {}
+  }
 
+  const online = navigator.onLine !== false;
   const known = hasDict[word];
-  const useDict = navigator.onLine !== false && (!known || known.ok !== false);
+  const dictBad = !!(known && known.ok === false);          /* 探测过：确定没有真人音 */
+  const dictGood = !!(known && known.ok === true);          /* 探测过：确定有真人音 */
+  const isPhrase = /\s/.test(word);
 
-  /* 已知没有真人音 → 直接同步朗读（保住用户手势，iPad 上也能出声） */
-  if (!useDict) { done(); speakLocal(word); return; }
+  /* 同步排好音源顺序，点击手势不丢 */
+  const srcs = [];
+  if (online) {
+    /* 单字默认先试真人音；短语只有在"确认有真人音"时才先试，
+       否则直接用 ②（短语没有真人音的概率太高，先失败会白白拖 600ms） */
+    if (!dictBad && (!isPhrase || dictGood)) srcs.push(["dict", YOUDAO_VOICE(word)]);
+    srcs.push(["rv", RV_VOICE(word)]);
+  }
 
-  let a;
-  try { a = new Audio(YOUDAO_VOICE(word)); } catch (e) { done(); speakLocal(word); return; }
-  curAudio = a;
-  let moved = false, started = false, timer = 0;
-  /* onerror 和 play() 的 reject 会同时到达 —— 必须去重，
-     否则本地 TTS 会被连叫两遍（旧版本就是这样，反而没声音）。 */
-  const fallback = (hard) => {
-    if (moved || over) return;
-    moved = true;
-    clearTimeout(timer);
-    try { a.pause(); } catch (e) {}
-    if (curAudio === a) curAudio = null;
-    /* 只有"源本身没内容"（媒体错误码 4 / NotSupportedError）才记进缓存，
-       网络抖动不记，免得把好词误判成没有音频。 */
-    if (hard && navigator.onLine !== false) rememberDict(word, false);
-    done();
-    speakLocal(word);
+  let i = 0;
+  const next = () => {
+    if (over) return;
+    if (i >= srcs.length) { done(); speakLocal(word); return; }   /* 离线 / 都失败 → 本地语音 */
+    const tag = srcs[i][0], url = srcs[i][1];
+    i++;
+    let a;
+    try { a = new Audio(url); } catch (e) { next(); return; }
+    curAudio = a;
+    let moved = false, started = false, timer = 0;
+    /* onerror 和 play() 的 reject 会同时到达 —— 必须去重，
+       否则本地 TTS 会被连叫两遍，cancel()+speak() 互相打断反而没声音。 */
+    const skip = hard => {
+      if (moved || over) return;
+      moved = true;
+      clearTimeout(timer);
+      try { a.pause(); } catch (e) {}
+      if (curAudio === a) curAudio = null;
+      /* 只有"源本身没内容"（媒体错误码 4）才记进缓存，网络抖动不记 */
+      if (hard && online && tag === "dict") rememberDict(word, false);
+      next();
+    };
+    a.addEventListener("error", () => skip(!!(a.error && a.error.code === 4)));
+    a.addEventListener("playing", () => { started = true; clearTimeout(timer); });
+    a.onended = done;
+    /* 网络卡住时 play() 既不 resolve 也不 reject，加个看门狗避免永远没声 */
+    timer = setTimeout(() => { if (!started) skip(false); }, 4200);
+    const p = a.play();
+    if (p && p.catch) p.catch(e => skip(!!(e && e.name === "NotSupportedError")));
   };
-  a.addEventListener("error", () => fallback(!!(a.error && a.error.code === 4)));
-  a.addEventListener("playing", () => { started = true; clearTimeout(timer); });
-  a.onended = done;
-  /* 网络卡住时 play() 既不 resolve 也不 reject，加个看门狗避免永远没声 */
-  timer = setTimeout(() => { if (!started) fallback(false); }, 3200);
-  const p = a.play();
-  if (p && p.catch) p.catch(e => fallback(!!(e && e.name === "NotSupportedError")));
+  next();
 }
 function speakCurrent() {
   if (current !== null) speak(D.words[current]);
@@ -521,6 +546,8 @@ function extraTrans(i) { return (D.extraTrans && D.extraTrans[i]) || ""; }
 function renderExtraPanel(node) {
   const i = node.i, word = D.extra[i];
   extraCurrent = word;
+  /* 顺便探一下这个词有没有真人音：有的话点击时就播真人音，没有就走网络 TTS */
+  probeDict([word]);
   $("ph").classList.add("hidden");
   $("detail").classList.remove("hidden");
   $("dWord").textContent = word;
