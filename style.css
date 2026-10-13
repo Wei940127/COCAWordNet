@@ -169,8 +169,7 @@ main { flex: 1; display: flex; min-height: 0; }
 }
 .dmeta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0 14px; }
 .phon { color: var(--accent); font-size: 15px; }
-.phon.nophon { color: #9ca3af; font-size: 12px; }
-.chip {
+.phon.nophon { color: #9ca3af; font-size: 12px; }.chip {
   background: #eef2ff; color: #4338ca; border-radius: 20px;
   padding: 2px 10px; font-size: 11.5px;
 }
@@ -258,6 +257,7 @@ main { flex: 1; display: flex; min-height: 0; }
   padding: 4px 9px; font-size: 13px; cursor: pointer; color: #1f2937;
 }
 .colb:hover { border-color: var(--accent); background: var(--accent-soft); }
+.colb.playing { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); animation: pulse .8s ease infinite; }
 .colb i { font-style: normal; font-size: 10.5px; color: #94a3b8; }
 
 /* ---- progress map modal ---- */

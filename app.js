@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v10";
+const APP_VERSION = "v11";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -400,21 +400,109 @@ function speakLocal(word) {
   if (US_VOICE) u.voice = US_VOICE;
   speechSynthesis.speak(u);
 }
-function speak(word) {
+
+/* ---- 发音音源 ----
+   有道真人音（type=2 美音）覆盖全部单字，但**搭配短语里约 66% 它没有音频**，
+   这种情况它返回 HTTP 500（内容是 JSON 不是 mp3），<audio> 会立刻 error。
+
+   关键：不能等"播放失败"再异步回退到浏览器 TTS —— 那已经脱离用户手势，
+   iOS 会静默丢弃这次朗读（电脑上则容易被 cancel()+speak() 连调两次打断）。
+   所以改成**面板渲染时先探测**（只读音频元数据，很轻），结果缓存起来；
+   点击时就能同步决定：有真人音 → 播真人音；没有 → 直接本地 TTS。 */
+const YOUDAO_VOICE = w => "https://dict.youdao.com/dictvoice?audio=" + encodeURIComponent(w) + "&type=2";
+const HAS_DICT_KEY = "coca10000.hasdict.v1";
+const PROBE_FRESH = 7 * 24 * 3600 * 1000;   /* 探测结果 7 天内有效 */
+
+let hasDict = {};
+try { hasDict = JSON.parse(localStorage.getItem(HAS_DICT_KEY) || "{}") || {}; } catch (e) { hasDict = {}; }
+function rememberDict(w, ok) {
+  hasDict[w] = { ok: ok, t: Date.now() };
+  const keys = Object.keys(hasDict);
+  if (keys.length > 4000) {          /* 只留最近的，避免 localStorage 无限膨胀 */
+    keys.sort((a, b) => (hasDict[b].t || 0) - (hasDict[a].t || 0)).slice(3000).forEach(k => delete hasDict[k]);
+  }
+  try { localStorage.setItem(HAS_DICT_KEY, JSON.stringify(hasDict)); } catch (e) {}
+}
+
+/* 静默探测若干词有没有真人音（只下元数据，不播放） */
+function probeDict(words) {
+  if (navigator.onLine === false) return;
+  words.forEach(w => {
+    const rec = hasDict[w];
+    if (rec && Date.now() - (rec.t || 0) < PROBE_FRESH) return;
+    hasDict[w] = { ok: false, t: Date.now(), probing: true };   /* 占位，避免同一批重复探测 */
+    let a;
+    try { a = document.createElement("audio"); } catch (e) { return; }
+    a.preload = "metadata";
+    let settled = false;
+    const finish = (ok, hard) => {
+      if (settled) return;
+      settled = true;
+      /* 只有"这个源本身没有内容"（媒体错误码 4 / 被 ORB 拦）才记成没有；
+         网络类失败保持"未知"，下次还会再试，免得把好词误判成没音频。 */
+      if (ok) rememberDict(w, true);
+      else if (hard) rememberDict(w, false);
+      else {
+        delete hasDict[w];
+        try { localStorage.setItem(HAS_DICT_KEY, JSON.stringify(hasDict)); } catch (e) {}
+      }
+      try { a.removeAttribute("src"); a.load(); } catch (e) {}
+    };
+    a.addEventListener("loadedmetadata", () => finish(true));
+    a.addEventListener("error", () => finish(false, !!(a.error && a.error.code === 4)));
+    setTimeout(() => finish(false, false), 6000);
+    a.src = YOUDAO_VOICE(w);
+  });
+}
+
+/* btn: 可选，点击的那个小按钮（搭配/关联词），一起显示播放态 */
+function speak(word, btnEl) {
   if (!word) return;
   const btn = $("dSpeak");
   btn.classList.add("playing");
-  const done = () => btn.classList.remove("playing");
+  if (btnEl) btnEl.classList.add("playing");
+  let over = false;
+  const done = () => {
+    if (over) return;
+    over = true;
+    btn.classList.remove("playing");
+    if (btnEl) btnEl.classList.remove("playing");
+  };
+
   if (curAudio) { try { curAudio.pause(); } catch (e) {} curAudio = null; }
-  /* real American voice from Youdao dict (type=2 = US), TTS fallback offline */
-  try {
-    const a = new Audio("https://dict.youdao.com/dictvoice?audio=" +
-      encodeURIComponent(word) + "&type=2");
-    curAudio = a;
-    a.onended = done;
-    a.onerror = () => { curAudio = null; done(); speakLocal(word); };
-    a.play().catch(() => { curAudio = null; done(); speakLocal(word); });
-  } catch (e) { done(); speakLocal(word); }
+  if ("speechSynthesis" in window) { try { speechSynthesis.cancel(); } catch (e) {} }
+
+  const known = hasDict[word];
+  const useDict = navigator.onLine !== false && (!known || known.ok !== false);
+
+  /* 已知没有真人音 → 直接同步朗读（保住用户手势，iPad 上也能出声） */
+  if (!useDict) { done(); speakLocal(word); return; }
+
+  let a;
+  try { a = new Audio(YOUDAO_VOICE(word)); } catch (e) { done(); speakLocal(word); return; }
+  curAudio = a;
+  let moved = false, started = false, timer = 0;
+  /* onerror 和 play() 的 reject 会同时到达 —— 必须去重，
+     否则本地 TTS 会被连叫两遍（旧版本就是这样，反而没声音）。 */
+  const fallback = (hard) => {
+    if (moved || over) return;
+    moved = true;
+    clearTimeout(timer);
+    try { a.pause(); } catch (e) {}
+    if (curAudio === a) curAudio = null;
+    /* 只有"源本身没内容"（媒体错误码 4 / NotSupportedError）才记进缓存，
+       网络抖动不记，免得把好词误判成没有音频。 */
+    if (hard && navigator.onLine !== false) rememberDict(word, false);
+    done();
+    speakLocal(word);
+  };
+  a.addEventListener("error", () => fallback(!!(a.error && a.error.code === 4)));
+  a.addEventListener("playing", () => { started = true; clearTimeout(timer); });
+  a.onended = done;
+  /* 网络卡住时 play() 既不 resolve 也不 reject，加个看门狗避免永远没声 */
+  timer = setTimeout(() => { if (!started) fallback(false); }, 3200);
+  const p = a.play();
+  if (p && p.catch) p.catch(e => fallback(!!(e && e.name === "NotSupportedError")));
 }
 function speakCurrent() {
   if (current !== null) speak(D.words[current]);
@@ -534,8 +622,10 @@ function renderPanel(i, extraNode) {
       "<button class=\"colb\" data-p=\"" + p + "\"><span>" + p + "</span><i>" + c + "</i></button>"
     ).join("");
     $("dColl").querySelectorAll(".colb").forEach(b => {
-      b.onclick = () => speak(b.dataset.p);
+      b.onclick = () => speak(b.dataset.p, b);
     });
+    /* 顺手探测这批搭配有没有真人音：点击时才好同步决定用哪个音源 */
+    probeDict(cl.map(x => x[0]));
   } else {
     $("dColl").innerHTML = "";
   }
