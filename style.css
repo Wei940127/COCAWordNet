@@ -299,11 +299,21 @@ main { flex: 1; display: flex; min-height: 0; }
 .lw {
   font-size: 13px; padding: 5px 10px; border-radius: 8px; cursor: pointer;
   border: 1px solid transparent; transition: .1s; white-space: nowrap;
+  display: inline-flex; align-items: baseline; gap: 6px; max-width: 100%;
+}
+.lw b { font-weight: 600; }
+/* 中文释义：跟在单词后面，过长省略（完整释义在 title 提示里） */
+.lw i {
+  font-style: normal; font-size: 11.5px; color: #64748b;
+  max-width: 108px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .lw:hover { border-color: #93c5fd; transform: translateY(-1px); }
 .lw.s0 { background: #f1f5f9; color: #475569; }
 .lw.s1 { background: #fef3c7; color: #92400e; }
-.lw.s2 { background: #dcfce7; color: #15803d; font-weight: 600; }
+.lw.s1 i { color: #a16207; }
+.lw.s2 { background: #dcfce7; color: #15803d; }
+.lw.s2 b { font-weight: 600; }
+.lw.s2 i { color: #15803d; opacity: .78; }
 .lw.on { outline: 2px solid #1d4ed8; outline-offset: 1px; }
 .lbody .lempty { color: #9ca3af; font-size: 13px; padding: 20px 4px; width: 100%; text-align: center; }
 

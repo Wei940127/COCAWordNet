@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v8";
+const APP_VERSION = "v9";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -821,7 +821,8 @@ function listRows() {
   for (let i = 0; i < N; i++) {
     if (b && D.band[i] !== b) continue;
     if (listMode !== "all" && statusOf(i) !== +listMode) continue;
-    if (q && D.words[i].toLowerCase().indexOf(q) < 0) continue;
+    if (q && D.words[i].toLowerCase().indexOf(q) < 0 &&
+        String(D.trans[i] || "").toLowerCase().indexOf(q) < 0) continue;
     rows.push(i);
   }
   return rows;
@@ -838,12 +839,16 @@ function renderList(resetCap) {
     (listMode === "all" ? "（掌握 " + m + " · 学习中 " + l + " · 未学 " + (rows.length - m - l) + "）" : "");
 
   const show = rows.slice(0, listCap);
+  const clean = s => String(s || "").replace(/\\[rnt]/g, " ").replace(/["<>]/g, "").replace(/\s+/g, " ").trim();
   $("listBody").innerHTML = show.length
-    ? show.map(i =>
-        '<span class="lw s' + statusOf(i) + (i === current ? " on" : "") + '" data-i="' + i +
-        '" title="' + (b ? "" : BAND_NAMES[D.band[i]] + " · ") +
-        String(D.trans[i] || "").replace(/"/g, "").slice(0, 40) + '">' +
-        D.words[i] + "</span>").join("")
+    ? show.map(i => {
+        const zh = clean(D.trans[i]).split(/[；;]/)[0].slice(0, 24);
+        const tip = (BAND_NAMES[D.band[i]] + " 词层 · 第 " + BAND_RANGE[D.band[i]] + " 词 · ") +
+          clean(D.trans[i]).slice(0, 90) + " · 点击发音";
+        return '<span class="lw s' + statusOf(i) + (i === current ? " on" : "") + '" data-i="' + i +
+          '" title="' + tip + '"><b>' + D.words[i] + "</b>" +
+          (zh ? '<i>' + zh + "</i>" : "") + "</span>";
+      }).join("")
     : '<div class="lempty">这里还没有符合条件的词</div>';
 
   $("listMore").innerHTML = rows.length > show.length
@@ -869,8 +874,11 @@ $("listSeg").addEventListener("click", e => {
 $("listBody").addEventListener("click", e => {
   const w = e.target.closest(".lw");
   if (!w) return;
+  const i = +w.dataset.i;
   $("listModal").classList.add("hidden");
-  go(+w.dataset.i);
+  go(i);
+  /* 点词即发音（点按本身就是用户手势，iOS 也允许直接播放） */
+  speak(D.words[i]);
 });
 
 /* ---------- 跨设备迁移：合并规则 ---------- */
