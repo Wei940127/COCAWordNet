@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v9";
+const APP_VERSION = "v10";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -281,10 +281,12 @@ function draw() {
         if (d.i !== current) { trail.push(current); if (trail.length > 24) trail.shift(); expand(d.i); }
         renderPanel(d.i);
       } else {
-        /* out-of-list word: no network behind it — show what we know + play it */
+        /* out-of-list word: no network behind it — just show what we know */
         renderPanel(null, d);
-        speak(d.word);
       }
+      /* 词表内的词和词表外的词一样：点一下就先朗读，
+         面板顶部同时给出 音标 / 释义，一眼就能看清。 */
+      speak(d.word);
     })
     .on("dblclick", (e, d) => { e.stopPropagation(); if (d.kind === "w") expand(d.i, { reset: true }); })
     .on("mouseenter", (e, d) => {
@@ -436,12 +438,15 @@ function renderExtraPanel(node) {
   $("dWord").textContent = word;
   const ph = extraPhon(i);
   $("dPhon").textContent = ph ? "/" + ph + "/" : "无音标 · 点 🔊 听发音";
+  $("dPhon").classList.toggle("nophon", !ph);
   $("dBand").textContent = "词表外关联词";
   $("dTags").innerHTML = "";
   document.querySelectorAll(".mbtn").forEach(b => b.classList.remove("on"));
   $("masteryRow").style.display = "none";
-  $("dTrans").textContent = extraTrans(i) || "（暂无释义）";
-  $("dDef").style.display = "none";
+  const tr = extraTrans(i);
+  $("dTrans").textContent = tr || "（暂无释义，可点 🔊 听发音）";
+  $("dTrans").classList.toggle("dim", !tr);
+  $("bDef").style.display = "none";
   $("dDef").textContent = "";
   $("bMorph").style.display = "none";
   $("bColl").style.display = "none";
@@ -484,7 +489,9 @@ function renderPanel(i, extraNode) {
   document.querySelectorAll("button.ext.on").forEach(x => x.classList.remove("on"));
 
   $("dWord").textContent = D.words[i];
-  $("dPhon").textContent = D.phon[i] ? "/" + D.phon[i] + "/" : "";
+  const ph = D.phon[i];
+  $("dPhon").textContent = ph ? "/" + ph + "/" : "无音标";
+  $("dPhon").classList.toggle("nophon", !ph);
   $("dBand").textContent = BAND_NAMES[D.band[i]] + " 词层 · 高频第 " + BAND_RANGE[D.band[i]] + " 词";
   const tags = (D.tag[i] || "").split(" ").filter(Boolean);
   $("dTags").innerHTML = tags.map(t => "<i>" + t + "</i>").join("");
@@ -493,9 +500,11 @@ function renderPanel(i, extraNode) {
     b.classList.toggle("on", +b.dataset.s === statusOf(i));
   });
 
-  $("dTrans").textContent = D.trans[i] || "（暂无释义）";
+  const tr = D.trans[i];
+  $("dTrans").textContent = tr || "（暂无释义）";
+  $("dTrans").classList.toggle("dim", !tr);
   $("dDef").textContent = D.def[i] || "";
-  $("dDef").style.display = D.def[i] ? "" : "none";
+  $("bDef").style.display = D.def[i] ? "" : "none";
 
   /* morphology: 词根拆解 + 同根词 */
   const w = D.words[i];
@@ -510,7 +519,7 @@ function renderPanel(i, extraNode) {
     $("dMorphNote").textContent = "· 同根词 " + cg.length + " 个";
     $("dCogn").innerHTML = cg.map(c => "<button data-w=\"" + c + "\">" + c + "</button>").join("");
     $("dCogn").querySelectorAll("button").forEach(b => {
-      b.onclick = () => { trail.push(current); expand(D.idx[b.dataset.w]); };
+      b.onclick = () => { trail.push(current); expand(D.idx[b.dataset.w]); speak(b.dataset.w); };
     });
   } else {
     $("dMorphNote").textContent = "";
@@ -542,7 +551,7 @@ function renderPanel(i, extraNode) {
     return `<span><b>${f}</b><i>${c}</i></span>`;
   }).join("") || "<span style='color:#9ca3af;font-size:12px'>无</span>";
   $("dFam").querySelectorAll(".jump").forEach(el => {
-    el.onclick = () => go(el.dataset.w);
+    el.onclick = () => { go(el.dataset.w); speak(el.dataset.w); };
   });
 
   /* relations */
@@ -565,7 +574,7 @@ function renderPanel(i, extraNode) {
   });
   $("dRel").innerHTML = html || "<span class='muted'>该词暂无关系词</span>";
   $("dRel").querySelectorAll("button[data-i]").forEach(b => {
-    b.onclick = () => { trail.push(current); expand(+b.dataset.i); };
+    b.onclick = () => { trail.push(current); expand(+b.dataset.i); speak(D.words[+b.dataset.i]); };
   });
   $("dRel").querySelectorAll("button.ext").forEach(b => {
     b.onclick = () => {

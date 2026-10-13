@@ -61,7 +61,7 @@
   </div>
 
   <div class="stats" id="stats"></div>
-  <button id="verPill" class="verpill" title="当前版本 · 点一下检查更新">v9</button>
+  <button id="verPill" class="verpill" title="当前版本 · 点一下检查更新">v10</button>
 </header>
 
 <main>
@@ -70,7 +70,7 @@
       <button id="focusBtn" class="btn" title="清除其他节点，只看当前词的关系">◎ 聚焦当前词</button>
       <button id="clearBtn" class="btn" title="清空画布">✕ 清空</button>
       <span id="trail" class="trail"></span>
-      <span class="hint">点击节点展开 · 灰色小点=词表外词（点开有释义和发音）· 滚轮缩放 · 拖拽平移</span>
+      <span class="hint">点击任意节点：听发音 + 看音标和释义 · 灰色小点=词表外词 · 滚轮缩放 · 拖拽平移</span>
     </div>
     <svg id="graph"><defs>
       <filter id="fwGlow" x="-30%" y="-30%" width="160%" height="160%">
@@ -114,6 +114,9 @@
           <span id="dBand" class="chip"></span>
           <span id="dTags" class="tags"></span>
         </div>
+        <!-- 简洁信息行：单词 / 音标 / 🔊 之下直接给出中文释义。
+             词表内外的词都走这里，点开任意节点就先看到这三样。 -->
+        <div id="dTrans" class="qtrans"></div>
       </div>
 
       <div class="mastery" id="masteryRow">
@@ -122,9 +125,8 @@
         <button class="mbtn" data-s="2">● 已掌握</button>
       </div>
 
-      <div class="block">
-        <h3>释义</h3>
-        <div id="dTrans" class="trans"></div>
+      <div class="block" id="bDef" style="display:none">
+        <h3>英文释义</h3>
         <div id="dDef" class="def"></div>
       </div>
 
