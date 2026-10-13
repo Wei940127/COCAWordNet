@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v14";
+const APP_VERSION = "v15";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -93,8 +93,16 @@ const extraIdx = r => -r - 1;
 
 /* grouped relations of a headword, by type */
 function relsOf(i) {
+  const list = D.adj[i] || [];
+  /* 守卫（数据已在源头上清理过，这里只是兜底）：同一对词既有上位词又有下位词时，
+     只保留「上位词」一侧 —— 否则画面上会同时出现紫线和蓝线，
+     节点位置还会和线色打架（WordNet 不同义项会形成这种环）。 */
+  const key = r => (r < 0 ? "x" : "w") + r;
+  const keepTwo = new Set();
+  for (const [t, r] of list) if (t === 2) keepTwo.add(key(r));
   const groups = {};
-  (D.adj[i] || []).forEach(([t, r]) => {
+  list.forEach(([t, r]) => {
+    if (t === 3 && keepTwo.has(key(r))) return;   /* 上位词优先 */
     (groups[t] = groups[t] || []).push(r);
   });
   return groups;
