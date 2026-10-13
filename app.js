@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v16";
+const APP_VERSION = "v17";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -449,39 +449,14 @@ function unproject(sx, sy, z, lvl) {
   return [CX + (sx - CX) / p, CY + Y];
 }
 
-/* ---------- 地面网格（唯一的“平面”提示，很淡） ---------- */
-let gridSegs = [];
-function buildGrid() {
-  const W = width(), H = height();
-  const step = 74, pad = 8;
-  const x0 = pad, x1 = W - pad, y0 = gy0(), y1 = gy1();
-  gridSegs = [];
-  for (let x = x0; x <= x1 + 0.5; x += step) gridSegs.push([[x, y0], [x, y1]]);
-  for (let y = y0; y <= y1 + 0.5; y += step) gridSegs.push([[x0, y], [x1, y]]);
-  gGrid.selectAll("line.grid").data(gridSegs).join(
-    enter => enter.append("line").attr("class", "grid")
-      .attr("stroke", "#b9c6da").attr("stroke-width", 0.6),
-    update => update,
-    exit => exit.remove()
-  );
-}
+/* ---------- 层级小标签（不画任何平面/网格，只留文字提示） ---------- */
 /* 左侧层级小标签的文字（不放色块底子，靠 CSS 白描边保证可读） */
 const axText = l => isFlat() ? "平面视图 · 上下位词与当前词同层"
   : (l < 0 ? "▲ 上位词" + (l < -1 ? " " + (-l) + " 级" : "")
     : l > 0 ? "▼ 下位词" + (l > 1 ? " " + l + " 级" : "")
     : "当前词");
 function paintGrid() {
-  /* 网格线：投影后按纵深渐隐 —— 远处的线淡、近处的线实，空间感更强 */
-  gGrid.selectAll("line.grid").each(function (seg) {
-    const a = projXYZ(seg[0][0], seg[0][1], 0);
-    const b = projXYZ(seg[1][0], seg[1][1], 0);
-    const t = Math.max(0, Math.min(1, ((a[1] + b[1]) / 2 - 60) / (height() - 140)));
-    d3.select(this)
-      .attr("x1", a[0]).attr("y1", mapY(a[1], 0))
-      .attr("x2", b[0]).attr("y2", mapY(b[1], 0))
-      .attr("stroke-opacity", 0.07 + 0.22 * t);
-  });
-  /* 只留左上角一枚小字标签标明每层含义，不再画搁板/圆牌 */
+  /* 只留左上角一枚小字标签标明每层含义，不画搁板/圆牌/网格 */
   const lvls = Array.from(bands.keys());
   gGrid.selectAll("text.axlbl").data(lvls, l => l).join(
     enter => enter.append("text").attr("class", "axlbl").attr("x", 10).attr("font-size", 10)
@@ -684,7 +659,6 @@ function draw() {
       : d.kind === "x" ? "#64748b" : "#334155"))
     .text(d => d.word);
 
-  buildGrid();
   paintGrid();
   paint();
 
@@ -1556,7 +1530,6 @@ function applyTilt(deg, save) {
   /* 平面视图下没有高低差：层级光晕 / 圆牌的配色会误导，整体隐藏（CSS 控制） */
   gNodes.classed("flatview", isFlat());
   gGrid.classed("flatview", isFlat());
-  if (!gridSegs.length) buildGrid();
   paintGrid();
   paint();
 }
@@ -1599,7 +1572,7 @@ document.addEventListener("keydown", e => {
 
 window.addEventListener("resize", () => {
   if (sim) { sim.force("center", d3.forceCenter(width() / 2, height() / 2)); sim.alpha(0.3).restart(); }
-  buildGrid(); paintGrid(); paint();
+  paintGrid(); paint();
 });
 
 /* ---------- boot ---------- */
