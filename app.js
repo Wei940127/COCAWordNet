@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v7";
+const APP_VERSION = "v8";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -84,6 +84,9 @@ const g = svg.append("g");
 const gLinks = g.append("g");
 gLinks.attr("filter", "url(#fwGlow)");
 const gNodes = g.append("g");
+/* 单独的标签层，画在所有节点之上：
+   否则后画的圆点会盖住先画节点下面的单词，看起来就像“线端点没有词”。 */
+const gLabels = g.append("g");
 const width = () => svg.node().clientWidth;
 const height = () => svg.node().clientHeight;
 svg.call(d3.zoom().scaleExtent([0.25, 4]).on("zoom", e => g.attr("transform", e.transform)));
@@ -137,14 +140,14 @@ function startSim() {
 
 function prune() {
   if (nodes.length <= MAXN) return;
-  const keepIds = new Set();
-  if (current !== null) keepIds.add("w:" + current);
-  nodes.forEach(n => {
-    if (n.dist <= 1 || n.expanded || statusOf(n.i) === 2 && n.kind === "w") keepIds.add(n.id);
-  });
+  /* 只考虑离当前词两步以外的节点；已掌握的词永远保留，
+     用户展开过的节点尽量靠后移除。这样图始终有上限，
+     不会膨胀到看不清、节点被挤出画布。 */
   const removable = nodes
-    .filter(n => !keepIds.has(n.id))
-    .sort((a, b) => (b.dist - a.dist) || (statusOf(a.i) === 0 ? -1 : 1));
+    .filter(n => n.dist >= 2 && n.id !== "w:" + current &&
+                 !(n.kind === "w" && statusOf(n.i) === 2))
+    .sort((a, b) => ((a.expanded ? 1 : 0) - (b.expanded ? 1 : 0)) ||
+                    ((statusOf(a.i) === 1 ? 1 : 0) - (statusOf(b.i) === 1 ? 1 : 0)));
   const over = nodes.length - MAXN;
   const kill = new Set(removable.slice(0, Math.max(0, over)).map(n => n.id));
   if (!kill.size) return;
@@ -164,14 +167,20 @@ function expand(i, opts) {
   const me = ensureNode("w", i, 0);
   me.dist = 0;
   const groups = relsOf(i);
+  const near = new Set([me.id]);
   TYPE_PRIORITY.forEach(t => {
     (groups[t] || []).forEach(r => {
       const kind = isWord(r) ? "w" : "x";
       const j = isWord(r) ? r : extraIdx(r);
       const n = ensureNode(kind, j, 1);
+      n.dist = 1;
+      near.add(n.id);
       ensureLink(me, n, t);
     });
   });
+  /* 其它节点离当前词已有两步远：重新计算距离（而不是累加），
+     prune 才能知道哪些节点现在离得很远、可以让位。 */
+  nodes.forEach(n => { if (!near.has(n.id)) n.dist = 2; });
   me.expanded = true;
   current = i;
   prune();
@@ -209,6 +218,7 @@ function clearGraph() {
   current = null; trail = [];
   gLinks.selectAll("*").remove();
   gNodes.selectAll("*").remove();
+  gLabels.selectAll("*").remove();
   if (sim) sim.stop();
   document.getElementById("emptyState").classList.remove("hidden");
   document.getElementById("detail").classList.add("hidden");
@@ -227,7 +237,7 @@ function nodeFill(d) {
   return s === 2 ? "#16a34a" : s === 1 ? "#f59e0b" : "#cbd5e1";
 }
 
-let nodeSel = null, linkSel = null;
+let nodeSel = null, linkSel = null, labelSel = null;
 
 function draw() {
   nodeSel = gNodes.selectAll("g.node").data(nodes, d => d.id);
@@ -255,26 +265,15 @@ function draw() {
     .style("cursor", "pointer")
     .style("pointer-events", "all");
 
-  enter.append("text")
-    .attr("dy", d => radius(d) + 12)
-    .attr("text-anchor", "middle")
-    .style("pointer-events", "none")
-    .text(d => d.word)
-    .attr("fill", d => (d.kind === "x" ? "#94a3b8" : "#334155"))
-    .attr("font-size", d => (d.kind === "x" ? 9 : d.id === "w:" + current ? 14 : 11));
-
   const all = enter.merge(nodeSel);
   all.select("circle.vis")
     .attr("r", radius)
     .attr("fill", nodeFill)
-    .attr("stroke", d => (d.id === "w:" + current ? "#1d4ed8" : "#fff"))
-    .attr("stroke-width", d => (d.id === "w:" + current ? 3 : 1.5));
+    .attr("stroke", d => (d.id === "w:" + current ? "#1d4ed8"
+      : d.kind === "x" ? "#9fb0c6" : "#fff"))
+    .attr("stroke-width", d => (d.id === "w:" + current ? 3 : d.kind === "x" ? 1.2 : 1.5));
   all.select("circle.hit")
     .attr("r", d => radius(d) + (d.kind === "x" ? 8 : 3));
-  all.select("text")
-    .attr("dy", d => radius(d) + 12)
-    .attr("font-size", d => (d.kind === "x" ? 9 : d.id === "w:" + current ? 14 : 11))
-    .text(d => d.word);
 
   all.on("click", (e, d) => {
       e.stopPropagation();
@@ -307,12 +306,38 @@ function draw() {
     .attr("stroke-dasharray", l => (l.t === 4 ? "4 3" : null));
   linkSel = le.merge(linkSel);
 
+  /* 标签层：永远在节点之上，位置跟随节点 */
+  labelSel = gLabels.selectAll("text").data(nodes, d => d.id);
+  labelSel.exit().remove();
+  labelSel = labelSel.enter().append("text")
+    .attr("text-anchor", "middle")
+    .style("pointer-events", "none")
+    .merge(labelSel);
+  labelSel
+    .attr("x", d => (d.x == null ? 0 : d.x))
+    .attr("y", d => (d.y == null ? 0 : d.y + radius(d) + 12))
+    .attr("font-size", d => (d.kind === "x" ? 10 : d.id === "w:" + current ? 14 : 11))
+    .attr("fill", d => (d.kind === "x" ? "#64748b" : "#334155"))
+    .text(d => d.word);
+
   /* sim 只有在展开过词之后才存在：空画布上合并进度时 draw() 会被直接调用，
      这里必须判空，否则整段刷新会中断。 */
   if (sim) sim.on("tick", () => {
+    /* 把节点约束在可视范围内（留出工具栏 / 图例 / 标签的边距），
+       这样任何一条线的端点都一定在画面里，不会出现“线头伸到屏幕外、
+       端点找不到单词”的情况。 */
+    const W = width(), H = height();
+    const mx = 48, mt = 72, mb = 58;
+    nodes.forEach(d => {
+      if (d.x == null || d.y == null) return;
+      if (d.x < mx) d.x = mx; else if (d.x > W - mx) d.x = W - mx;
+      if (d.y < mt) d.y = mt; else if (d.y > H - mb) d.y = H - mb;
+    });
     linkSel.attr("x1", l => l.source.x).attr("y1", l => l.source.y)
            .attr("x2", l => l.target.x).attr("y2", l => l.target.y);
     all.attr("transform", d => `translate(${d.x},${d.y})`);
+    labelSel.attr("x", d => (d.x == null ? 0 : d.x))
+            .attr("y", d => (d.y == null ? 0 : d.y + radius(d) + 12));
   });
 }
 
