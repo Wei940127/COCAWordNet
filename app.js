@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v13";
+const APP_VERSION = "v14";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -115,7 +115,54 @@ const gNodes = g.append("g");
 const gLabels = g.append("g");
 const width = () => svg.node().clientWidth;
 const height = () => svg.node().clientHeight;
-svg.call(d3.zoom().scaleExtent([0.25, 4]).on("zoom", e => g.attr("transform", e.transform)));
+
+/* ---------- 节点渐变 ----------
+   纯色圆点在浅色背景上显得又扁又平。给每种节点颜色配一个
+   「左上高光 → 原色」的径向渐变，节点立刻有了球面感和立体感。
+   渐变用 objectBoundingBox 坐标，一个定义可以被任意大小的圆复用。 */
+const GRAD_EXTRA = ["#16a34a", "#f59e0b", "#cbd5e1", "#94a3b8", "#e2e8f0"];
+function lighten(hex, amt) {
+  const n = parseInt(hex.slice(1), 16);
+  let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  const L = (r + g + b) / 3;
+  const a = L > 200 ? 0.3 : L > 150 ? 0.42 : 0.55;   /* 本来就浅的颜色少提亮，避免和背景糊在一起 */
+  const k = amt !== undefined ? amt : a;
+  r = Math.round(r + (255 - r) * k);
+  g = Math.round(g + (255 - g) * k);
+  b = Math.round(b + (255 - b) * k);
+  return "#" + ((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1);
+}
+const gradId = c => "ng" + c.slice(1);
+(function buildDefs() {
+  const defs = svg.select("defs").node() ? svg.select("defs") : svg.append("defs");
+  Object.values(BAND_COLORS).concat(GRAD_EXTRA).forEach(c => {
+    const gd = defs.append("radialGradient")
+      .attr("id", gradId(c)).attr("cx", "35%").attr("cy", "28%").attr("r", "78%");
+    gd.append("stop").attr("offset", "0%").attr("stop-color", lighten(c));
+    gd.append("stop").attr("offset", "100%").attr("stop-color", c);
+  });
+})();
+
+/* 节点的基础色（用于渐变引用 / 投影柱颜色）与填充 */
+function nodeBase(d) {
+  const mode = document.getElementById("colorMode").value;
+  if (d.kind === "x") return "#e2e8f0";
+  if (mode === "flat") return "#94a3b8";
+  if (mode === "band") return bandColor(d.band);
+  const s = statusOf(d.i);
+  return s === 2 ? "#16a34a" : s === 1 ? "#f59e0b" : "#cbd5e1";
+}
+function nodeFill(d) { return "url(#" + gradId(nodeBase(d)) + ")"; }
+
+/* 层级配色：上位词（更抽象）紫色系、下位词（更具体）青色系 */
+const LVLCOL = { up: "#8b5cf6", down: "#0ea5e9" };
+const lvlColor = lvl => (lvl < 0 ? LVLCOL.up : lvl > 0 ? LVLCOL.down : null);
+svg.call(d3.zoom().scaleExtent([0.25, 4]).on("zoom", e => {
+  g.attr("transform", e.transform);
+  /* 缩得越小节点越挤：远观时把标签整体淡出，避免糊成一片；
+     放大回来立刻恢复，不用重算布局 */
+  gLabels.attr("opacity", e.transform.k < 0.7 ? 0.35 : 1);
+}));
 
 const tooltip = document.getElementById("tooltip");
 
@@ -297,15 +344,6 @@ function clearGraph() {
 }
 
 /* ---------- drawing ---------- */
-function nodeFill(d) {
-  const mode = document.getElementById("colorMode").value;
-  if (d.kind === "x") return "#e2e8f0";
-  if (mode === "flat") return "#94a3b8";
-  if (mode === "band") return bandColor(d.band);
-  const s = statusOf(d.i);
-  return s === 2 ? "#16a34a" : s === 1 ? "#f59e0b" : "#cbd5e1";
-}
-
 let nodeSel = null, linkSel = null, labelSel = null, stalkSel = null;
 
 /* ---------- 立体投影：分层带（strata） ----------
@@ -414,7 +452,7 @@ function buildGrid() {
   for (let y = y0; y <= y1 + 0.5; y += step) gridSegs.push([[x0, y], [x1, y]]);
   gGrid.selectAll("line.grid").data(gridSegs).join(
     enter => enter.append("line").attr("class", "grid")
-      .attr("stroke", "#cbd5e1").attr("stroke-width", 0.7).attr("stroke-opacity", 0.5),
+      .attr("stroke", "#b9c6da").attr("stroke-width", 0.6),
     update => update,
     exit => exit.remove()
   );
@@ -430,23 +468,52 @@ function floorPath(lvl) {
   });
   return "M" + pts.join("L") + "Z";
 }
+/* 左侧层级标签的文字（paintGrid 里文字和它的白色圆牌要用同一个） */
+const axText = l => isFlat() ? "— 平面视图（上位词·下位词与当前词同层）—"
+  : (l < 0 ? "▲ 上位词" + (l < -1 ? " " + (-l) + " 级" : "") + " · 更抽象"
+    : l > 0 ? "▼ 下位词" + (l > 1 ? " " + l + " 级" : "") + " · 更具体"
+    : "— 当前词所在平面 —");
+/* 粗略估算文字宽度（CJK 按 10.5px、拉丁按 5.6px），够画圆牌底子用 */
+function chipW(s) { let w = 16; for (const ch of s) w += ch.charCodeAt(0) > 255 ? 10.5 : 5.6; return w; }
 function paintGrid() {
+  /* 网格线：投影后按纵深渐隐 —— 远处的线淡、近处的线实，空间感更强，
+     也比「平均一张坐标纸」干净得多 */
   gGrid.selectAll("line.grid").each(function (seg) {
     const a = projXYZ(seg[0][0], seg[0][1], 0);
     const b = projXYZ(seg[1][0], seg[1][1], 0);
-    d3.select(this).attr("x1", a[0]).attr("y1", mapY(a[1], 0))
-      .attr("x2", b[0]).attr("y2", mapY(b[1], 0));
+    const t = Math.max(0, Math.min(1, ((a[1] + b[1]) / 2 - 60) / (height() - 140)));
+    d3.select(this)
+      .attr("x1", a[0]).attr("y1", mapY(a[1], 0))
+      .attr("x2", b[0]).attr("y2", mapY(b[1], 0))
+      .attr("stroke-opacity", 0.10 + 0.30 * t);
   });
-  /* 每层的地板 + 左侧层级标签 */
+  /* 分层带 = 一块块玻璃「搁板」：淡色衬底 + 柔和描边，
+     比光秃秃的虚线框更有质感，也让三个高度一眼可辨。
+     （lower() 把搁板压到网格线下面，网格线才不会被白衬底洗掉） */
   const lvls = Array.from(bands.keys());
   gGrid.selectAll("path.floor").data(lvls, l => l).join(
-    enter => enter.insert("path").attr("class", "floor")
-      .attr("fill", "none").attr("stroke-width", 1).attr("stroke-opacity", 0.5),
+    enter => enter.append("path").attr("class", "floor").lower(),
     update => update,
     exit => exit.remove()
-  ).attr("stroke", l => (l === 0 ? "#cbd5e1" : "#dbe3ee"))
-   .attr("stroke-dasharray", l => (l === 0 ? null : "3 4"))
+  )
+   .attr("fill", l => (l === 0 ? "rgba(255,255,255,0.55)"
+     : l < 0 ? "rgba(139,92,246,0.05)" : "rgba(14,165,233,0.05)"))
+   .attr("stroke", l => (l === 0 ? "#d7e0ec" : l < 0 ? "#c4b5fd" : "#8fd0f4"))
+   .attr("stroke-opacity", 0.55)
+   .attr("stroke-width", 1)
+   .attr("stroke-dasharray", l => (l === 0 ? null : "5 5"))
    .attr("d", l => floorPath(l));
+  /* 左侧层级标签的白色圆牌底（画在文字下面，文字永远可读） */
+  gGrid.selectAll("rect.axchip").data(lvls, l => l).join(
+    enter => enter.append("rect").attr("class", "axchip")
+      .attr("x", 3).attr("rx", 8).attr("height", 17),
+    update => update,
+    exit => exit.remove()
+  )
+   .attr("y", l => bands.get(l).top + 1)
+   .attr("width", l => chipW(axText(l)))
+   .attr("fill", "rgba(255,255,255,0.88)")
+   .attr("stroke", "#e3e8ef");
   gGrid.selectAll("text.axlbl").data(lvls, l => l).join(
     enter => enter.append("text").attr("class", "axlbl").attr("x", 10).attr("font-size", 10)
       .style("pointer-events", "none"),
@@ -455,10 +522,7 @@ function paintGrid() {
   )
    .attr("y", l => bands.get(l).top + 11)
    .attr("fill", l => (l < 0 ? "#7c3aed" : l > 0 ? "#0284c7" : "#94a3b8"))
-   .text(l => isFlat() ? "— 平面视图（上位词·下位词与当前词同层）—"
-     : (l < 0 ? "▲ 上位词" + (l < -1 ? " " + (-l) + " 级" : "") + " · 更抽象"
-       : l > 0 ? "▼ 下位词" + (l > 1 ? " " + l + " 级" : "") + " · 更具体"
-       : "— 当前词所在平面 —"));
+   .text(l => axText(l));
 }
 
 /* 越高/越低的层颜色越淡，帮助分辨高低（平面视图下不淡化） */
@@ -497,13 +561,17 @@ function paint() {
 
   paintGrid();
 
-  /* 投影柱：非平面上的节点垂一条虚线到主平面，立体感的关键 */
+  /* 投影柱：非平面上的节点垂一条彩色圆点线到主平面，立体感的关键。
+     颜色跟节点走（掌握度/词频层），比一排灰虚线柔和也更有信息量 */
   stalkSel = gStalks.selectAll("line").data(nodes.filter(n => n.lvl), n => n.id);
   stalkSel.exit().remove();
   stalkSel = stalkSel.enter().append("line")
-    .attr("stroke", "#94a3b8").attr("stroke-width", 1)
-    .attr("stroke-opacity", 0.32).attr("stroke-dasharray", "2 3")
+    .attr("stroke-width", 1.2)
+    .attr("stroke-opacity", 0.30)
+    .attr("stroke-dasharray", "1 4")
+    .attr("stroke-linecap", "round")
     .merge(stalkSel);
+  stalkSel.attr("stroke", d => nodeBase(d));
   stalkSel.each(function (d) {
     const a = projXYZ(d.x, d.y, lvlZ(d));
     const b = projXYZ(d.x, d.y, 0);
@@ -547,12 +615,26 @@ function draw() {
       .on("drag", (e, d) => { const c = unproject(e.x, e.y, lvlZ(d), d.lvl); d.fx = c[0]; d.fy = c[1]; })
       .on("end", (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null; }));
 
+  /* 层级光晕：上位词紫、下位词青 —— 立体视图里一眼认出节点悬浮在哪个高度
+     （画在圆点下面，所以先 append；平面视图里用 .flatview 类整体隐藏） */
+  enter.append("circle")
+    .attr("class", "glow")
+    .style("pointer-events", "none");
+
   enter.append("circle")
     .attr("class", "vis")
     .attr("r", radius)
     .attr("fill", nodeFill)
-    .attr("stroke", "#fff")
-    .attr("stroke-width", 1.5)
+    .attr("stroke", "rgba(255,255,255,0.95)")
+    .attr("stroke-width", 1.4)
+    .style("pointer-events", "none");
+
+  /* 当前词的旋转虚线环：焦点一眼可见，又不喧宾夺主 */
+  enter.append("circle")
+    .attr("class", "ring")
+    .attr("fill", "none")
+    .attr("stroke", "#2563eb").attr("stroke-width", 1.6)
+    .attr("stroke-dasharray", "4 6")
     .style("pointer-events", "none");
 
   /* transparent, larger hit area — makes the small out-of-list dots easy to click */
@@ -567,12 +649,19 @@ function draw() {
   /* paint() 每帧按投影结果摆位置，必须拿到**合并后**的选择集，
      否则这一帧新加进来的节点不会被摆上去。 */
   nodeSel = all;
+  all.select("circle.glow")
+    .attr("r", d => radius(d) + 6)
+    .attr("fill", d => lvlColor(d.lvl) || "none")
+    .attr("opacity", d => (lvlColor(d.lvl) ? 0.15 : 0));
   all.select("circle.vis")
     .attr("r", radius)
     .attr("fill", nodeFill)
     .attr("stroke", d => (d.id === "w:" + current ? "#1d4ed8"
       : d.kind === "x" ? "#9fb0c6" : "#fff"))
-    .attr("stroke-width", d => (d.id === "w:" + current ? 3 : d.kind === "x" ? 1.2 : 1.5));
+    .attr("stroke-width", d => (d.id === "w:" + current ? 3 : d.kind === "x" ? 1.2 : 1.4));
+  all.select("circle.ring")
+    .attr("r", d => radius(d) + 5.5)
+    .attr("display", d => (d.id === "w:" + current ? null : "none"));
   all.select("circle.hit")
     .attr("r", d => radius(d) + (d.kind === "x" ? 8 : 3));
 
@@ -604,20 +693,25 @@ function draw() {
   linkSel.exit().remove();
   const le = linkSel.enter().append("line")
     .attr("stroke", l => RMAP[l.t].color)
+    .attr("stroke-linecap", "round")
     .attr("stroke-opacity", l => (l.t === 6 ? 0.35 : 0.6))
     .attr("stroke-width", l => (l.t === 4 ? 2.3 : l.t === 6 ? 1 : 1.8))
     .attr("stroke-dasharray", l => (l.t === 4 ? "4 3" : null));
   linkSel = le.merge(linkSel);
 
-  /* 标签层：永远在节点之上，位置跟随节点 */
+  /* 标签层：永远在节点之上，位置跟随节点。
+     白色描边（paint-order: stroke）让文字压在连线上也读得清 */
   labelSel = gLabels.selectAll("text").data(nodes, d => d.id);
   labelSel.exit().remove();
   labelSel = labelSel.enter().append("text")
+    .attr("class", "lbl")
     .attr("text-anchor", "middle")
     .style("pointer-events", "none")
     .merge(labelSel);
   labelSel
-    .attr("fill", d => (d.kind === "x" ? "#64748b" : "#334155"))
+    .attr("class", d => "lbl" + (d.id === "w:" + current ? " cur" : ""))
+    .attr("fill", d => (d.id === "w:" + current ? "#1d4ed8"
+      : d.kind === "x" ? "#64748b" : "#334155"))
     .text(d => d.word);
 
   buildGrid();
@@ -1152,7 +1246,7 @@ function renderStats() {
    <div class="li" style="margin-top:5px;border-top:1px solid #eef2f7;padding-top:5px">
      <span class="sw" style="background:#e2e8f0;border:1px solid #cbd5e1"></span>词表外关联词（点开可看释义·听发音）
    </div>
-   <div class="li" style="color:#94a3b8">↑ 上位词悬在上方 · ↓ 下位词沉在下方 · 其余关系同一平面</div>`;
+   <div class="li" style="color:#94a3b8">↑ 上位词悬浮上方（紫环）· ↓ 下位词沉在下方（青环）· 其余关系同一平面</div>`;
 })();
 
 /* ---------- progress map ---------- */
@@ -1489,6 +1583,9 @@ function applyTilt(deg, save) {
     tbtn.classList.toggle("on", !isFlat());
   }
   if (save) { try { localStorage.setItem(TILT_KEY, String(Math.round(tiltDeg))); } catch (e) {} }
+  /* 平面视图下没有高低差：层级光晕 / 圆牌的配色会误导，整体隐藏（CSS 控制） */
+  gNodes.classed("flatview", isFlat());
+  gGrid.classed("flatview", isFlat());
   if (!gridSegs.length) buildGrid();
   paintGrid();
   paint();
