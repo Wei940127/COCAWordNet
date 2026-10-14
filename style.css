@@ -785,3 +785,66 @@ main { padding-bottom: env(safe-area-inset-bottom); }
   .codeta { height: 68px; }
 }
 
+/* ---------- 学习统计面板 ---------- */
+.sbody {
+  display: flex; flex-direction: column; gap: 12px;
+  max-height: min(64vh, 620px); overflow-y: auto; padding-right: 2px;
+}
+.skpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: 10px; }
+.skpi {
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 10px 12px; border-radius: 10px;
+  background: #f8fafc; border: 1px solid #eef2f7;
+}
+.skpi .kl { font-size: 11.5px; color: #94a3b8; }
+.skpi b { font-size: 24px; line-height: 1.15; color: #1e293b; font-variant-numeric: tabular-nums; }
+.skpi b small { font-size: 12px; font-weight: 600; color: #64748b; margin-left: 2px; }
+.skpi .ks { font-size: 11px; color: #94a3b8; line-height: 1.5; }
+
+.scard { padding: 12px 14px 13px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
+.scardhd { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.scardhd b { font-size: 13.5px; color: #334155; }
+.scardhd small { font-size: 11.5px; color: #94a3b8; font-weight: 400; }
+.scardhd .slegend { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 11px; color: #94a3b8; }
+.slegend i { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
+
+/* 14 天柱图：每列是个 flex 容器，柱子由下往上堆（column-reverse） */
+.schart { display: flex; gap: 4px; height: 104px; border-bottom: 1px solid #eef2f7; }
+.scol { flex: 1 1 0; display: flex; flex-direction: column; height: 100%; min-width: 0; }
+.scol[title]:hover .sbar { filter: brightness(1.06); }
+.sbar { flex: 1 1 auto; display: flex; flex-direction: column-reverse; gap: 1px; min-height: 0; }
+.sbar i { display: block; width: 100%; min-height: 2px; border-radius: 2px; }
+.sx { font-size: 10px; color: #94a3b8; text-align: center; padding-top: 4px; white-space: nowrap; overflow: hidden; }
+.scol.today .sx { color: var(--accent); font-weight: 700; }
+
+.sgrid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.stack.big { height: 22px; }
+.slist { display: flex; flex-direction: column; gap: 2px; margin-top: 9px; }
+.srow {
+  display: grid; grid-template-columns: 92px 1fr 78px; gap: 8px; align-items: center;
+  padding: 3px 0; font-size: 12.5px; color: #475569;
+}
+.srow .slab { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.srow .slab i { flex: 0 0 auto; width: 9px; height: 9px; border-radius: 3px; }
+.srow .strack { height: 8px; border-radius: 99px; background: #eef2f7; overflow: hidden; }
+.srow .strack i { display: block; height: 100%; border-radius: 99px; }
+.srow .snum { text-align: right; font-weight: 600; color: #334155; font-variant-numeric: tabular-nums; }
+.srow .snum em { font-style: normal; font-weight: 400; font-size: 11px; color: #94a3b8; margin-left: 4px; }
+.snote { margin-top: 10px; font-size: 11.5px; color: #94a3b8; line-height: 1.6; }
+.snote b { color: #dc2626; }
+
+.sempty { padding: 26px 12px 16px; text-align: center; color: #64748b; }
+.sempty .sbig { font-size: 38px; line-height: 1; }
+.sempty h3 { margin: 10px 0 6px; font-size: 16px; color: #334155; }
+.sempty p { margin: 0 0 16px; font-size: 12.5px; line-height: 1.85; }
+.sacts { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+
+@media (max-width: 900px) {
+  .sgrid2 { grid-template-columns: 1fr; }
+  .srow { grid-template-columns: 80px 1fr 68px; font-size: 12px; }
+  .skpi b { font-size: 21px; }
+  .sbody { max-height: 66vh; }
+  .schart { height: 92px; gap: 3px; }
+  .sx { font-size: 9.5px; }
+}
+

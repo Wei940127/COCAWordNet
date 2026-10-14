@@ -60,11 +60,12 @@
     <button id="nextBtn" class="btn primary" title="随机跳到下一个未掌握的词（快捷键 N）">下一个词 ▸</button>
     <button id="reviewBtn" class="btn" title="复习队列（快捷键 R）">🔁 复习</button>
     <button id="hardBtn" class="btn" title="难词清单：复习中老是记不住的词（快捷键 K）">⚠ 难词</button>
+    <button id="statBtn" class="btn" title="学习统计：复习量曲线 / 记忆保持率 / 下次复习排期（快捷键 S）">📊 统计</button>
     <button id="helpBtn" class="btn" title="图例与说明（快捷键 H）" aria-haspopup="dialog" aria-expanded="false">ⓘ 说明</button>
   </div>
 
   <div class="stats" id="stats"></div>
-  <button id="verPill" class="verpill" title="当前版本 · 点一下检查更新">v33</button>
+  <button id="verPill" class="verpill" title="当前版本 · 点一下检查更新">v34</button>
 </header>
 
 <main>
@@ -239,6 +240,22 @@
       <span>「忘过的」= 复习时评过「忘了」；「卡住的」= 还在学习中、复习 3 次以上没升上去 · 点单词直接跳到词网朗读</span>
       <span class="mio">
         <button id="hardReview" class="btn mini" title="把清单里的词排成一队，立刻开始复习">🔁 复习这些词</button>
+      </span>
+    </div>
+  </div>
+</div>
+
+<div id="statModal" class="modal hidden">
+  <div class="modalCard wide">
+    <div class="mhead">
+      <b>学习统计 <small id="statSub"></small></b>
+      <button id="statClose" class="mclose" title="关闭（Esc）">✕</button>
+    </div>
+    <div id="statBody" class="sbody"></div>
+    <div class="mfoot">
+      <span>数据只存在本机 · 逐日记录从 v34 起，更早的复习量按当天复习过的词数估算</span>
+      <span class="mio">
+        <button id="statMapLink" class="btn mini" title="按词层查看学习进度（快捷键 M）">▦ 进度地图</button>
       </span>
     </div>
   </div>

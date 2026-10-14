@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v33";
+const APP_VERSION = "v34";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -125,10 +125,64 @@ const setStatus = (i, s) => {
        「已掌握」则 4 天后再回来抽查。 */
     rec.ivl = s === 2 ? 4 : 0;
     rec.due = s === 2 ? now + 4 * DAY : now;
+    /* 统计日志：第一次标记 = 新学；第一次升到「已掌握」单独记一笔 */
+    if (!prev.s) statBump("nw");
+    if (s === 2) statBump("mst");
   }
   prog[key] = rec;
   saveProg();
 };
+
+/* ---------- 学习统计日志 ----------
+   统计面板要「按天」的行为数据（今天复习了多少张、新学了几个词），
+   这些从 prog 里推不出来（prog 只留每个词的当下状态），所以另记一本流水账：
+
+     一天一条记录，只留最近 STAT_KEEP 天
+       rv / ok / mid / bad  —— 复习张数，按评分三档拆开（记得 / 有印象 / 忘了）
+       nw / mst             —— 新学词数、升到「已掌握」的次数
+
+   老用户升级上来时按 prog 里的 last（上次复习时间）回填一次，
+   把「那天复习过多少词」估进 rv，这样不会看到一张空图。 */
+const STAT_KEY = "coca10000.stats.v1";
+const STAT_BF = "coca10000.stats.bf";
+const STAT_KEEP = 140;          /* 只留最近 140 天，够看趋势又不至于撑爆 localStorage */
+let stat = {};
+try { stat = JSON.parse(localStorage.getItem(STAT_KEY) || "{}") || {}; } catch (e) { stat = {}; }
+
+/* 本地日期（不能用 toISOString：那是 UTC，晚上 8 点后会算到第二天） */
+const dayKey = ts => {
+  const d = new Date(ts);
+  const p = n => (n < 10 ? "0" : "") + n;
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+};
+const emptyDay = () => ({ rv: 0, ok: 0, mid: 0, bad: 0, nw: 0, mst: 0 });
+
+function saveStat() {
+  const ks = Object.keys(stat).sort();       /* 键就是日期，排序 = 时间顺序 */
+  while (ks.length > STAT_KEEP) delete stat[ks.shift()];
+  try { localStorage.setItem(STAT_KEY, JSON.stringify(stat)); } catch (e) {}
+}
+/* 记一笔；带 n 时按张数累计 */
+function statBump(field, n) {
+  const d = stat[dayKey(Date.now())] || (stat[dayKey(Date.now())] = emptyDay());
+  d[field] = (d[field] || 0) + (n || 1);
+  saveStat();
+}
+
+(function backfillStat() {
+  try {
+    if (localStorage.getItem(STAT_BF)) return;
+    for (const k in prog) {
+      const v = prog[k];
+      if (!v || !v.s || !v.last) continue;
+      const kk = dayKey(v.last);
+      const d = stat[kk] || (stat[kk] = emptyDay());
+      d.rv += 1;
+    }
+    saveStat();
+    localStorage.setItem(STAT_BF, "1");
+  } catch (e) {}
+})();
 
 /* ---------- 间隔重复（SRS） ----------
    在「掌握度」之上再挂一个「下次复习时间」：每个词记一个当前间隔 ivl（天）、
@@ -1799,6 +1853,7 @@ function renderStats() {
        <div><i>3</i>线太密看不清：点左下「词关系」里的关系名，只看这一类</div>
        <div><i>4</i>滚轮缩放、拖拽平移；双击节点重新展开它</div>
        <div><i>5</i>老记不住的词会自动收进顶栏「⚠ 难词」，攒够了一起攻克</div>
+       <div><i>6</i>顶栏「📊 统计」看每天的复习量、记忆保持率和下次复习排期</div>
      </div>` +
     `<div class="hsec">图例</div>` +
     `<div class="li">
@@ -1822,7 +1877,8 @@ function renderStats() {
     `<div class="hkeys">
        <span><b>R</b>复习</span><span><b>N</b>下一个词</span><span><b>G</b>路径查找</span>
        <span><b>M</b>进度地图</span><span><b>L</b>单词列表</span><span><b>V</b>立体/平面</span>
-       <span><b>P</b>发音</span><span><b>H</b>本说明</span><span><b>K</b>难词清单</span><span><b>1–7</b>关系过滤</span><span><b>0</b>全部显示</span>
+       <span><b>P</b>发音</span><span><b>H</b>本说明</span><span><b>K</b>难词清单</span>
+       <span><b>S</b>学习统计</span><span><b>1–7</b>关系过滤</span><span><b>0</b>全部显示</span>
      </div>` +
     `</div>`;
   document.body.appendChild(pop);
@@ -1928,6 +1984,236 @@ $("mapClose").onclick = () => $("mapModal").classList.add("hidden");
 $("mapModal").addEventListener("click", e => {
   if (e.target === $("mapModal")) $("mapModal").classList.add("hidden");
 });
+
+/* ---------- 学习统计面板 ----------
+   和「进度地图」分工：地图回答「哪些词层学了多少」，这里回答「学得怎么样」——
+   复习量的日曲线、记忆保持率、下次到期分布、连续学习天数。
+
+   数据两个来源：
+     · prog  —— 全量口径（累计复习/遗忘次数、已掌握间隔、到期时间）
+     · stat  —— 逐日行为日志（见「学习统计日志」一节） */
+const STAT_DAYS = 14;              /* 活动图显示多少天 */
+
+/* 全量口径的复习总量：直接从 prog 汇总，含统计日志启用之前的历史 */
+function revTotals() {
+  let reps = 0, laps = 0, ivlSum = 0, ivlMax = 0, ivlN = 0;
+  for (const k in prog) {
+    const v = prog[k];
+    if (!v || !v.s) continue;
+    reps += v.reps || 0;
+    laps += v.laps || 0;
+    if (v.s === 2) {
+      const iv = v.ivl || 0;
+      ivlSum += iv; ivlN++;
+      if (iv > ivlMax) ivlMax = iv;
+    }
+  }
+  return { reps, laps, ivlN, ivlMax, ivlAvg: ivlN ? Math.round(ivlSum / ivlN) : 0 };
+}
+
+/* 下次复习的到期分布（只统计已排期的词，即掌握度 > 0） */
+function dueBuckets() {
+  const now = Date.now();
+  const b = [
+    { t: "已到期", n: 0, c: "#dc2626" },
+    { t: "今天", n: 0, c: "#f59e0b" },
+    { t: "1–3 天", n: 0, c: "#eab308" },
+    { t: "4–7 天", n: 0, c: "#84cc16" },
+    { t: "8–30 天", n: 0, c: "#22c55e" },
+    { t: "30 天以上", n: 0, c: "#0ea5e9" }
+  ];
+  for (const k in prog) {
+    const v = prog[k];
+    if (!v || !v.s) continue;
+    const dd = (v.due || 0) - now;      /* due=0 是 v21 之前的老记录 → 视为立刻到期 */
+    let slot;
+    if (dd <= 0) slot = 0;
+    else if (dayKey(v.due) === dayKey(now)) slot = 1;
+    else if (dd <= 3 * DAY) slot = 2;
+    else if (dd <= 7 * DAY) slot = 3;
+    else if (dd <= 30 * DAY) slot = 4;
+    else slot = 5;
+    b[slot].n++;
+  }
+  return b;
+}
+
+/* 最近 n 天的活动：没记录的天也补一条空的，图上的间距才均匀 */
+function actDays(n) {
+  const out = [];
+  const now = new Date();
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+    const k = dayKey(d.getTime());
+    const r = stat[k] || {};
+    out.push({ k, d, rv: r.rv || 0, ok: r.ok || 0, mid: r.mid || 0, bad: r.bad || 0, nw: r.nw || 0 });
+  }
+  return out;
+}
+
+/* 连续学习天数：今天还没学不算断（从昨天接着数） */
+function streakDays() {
+  let n = 0;
+  const now = new Date();
+  for (let i = 0; i <= STAT_KEEP; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+    const r = stat[dayKey(d.getTime())];
+    const act = r && (r.rv > 0 || r.nw > 0);
+    if (act) { n++; continue; }
+    if (i === 0) continue;              /* 今天还没开始学，不打断连续 */
+    break;
+  }
+  return n;
+}
+
+function renderStat() {
+  const rows = bandStats();
+  const tot = rows.reduce((a, r) => ({
+    total: a.total + r.total, learned: a.learned + r.learned, mastered: a.mastered + r.mastered
+  }), { total: 0, learned: 0, mastered: 0 });
+  const un = tot.total - tot.mastered - tot.learned;
+  const cover = tot.total ? Math.round((tot.mastered + tot.learned) / tot.total * 100) : 0;
+  const rt = revTotals();
+  const keep = rt.reps ? Math.max(0, Math.round((1 - rt.laps / rt.reps) * 100)) : null;
+  const dueN = dueCount();
+  const buckets = dueBuckets();
+  const days = actDays(STAT_DAYS);
+  const today = stat[dayKey(Date.now())] || emptyDay();
+  const sum14 = days.reduce((a, d) => a + d.rv, 0);
+  const learnedDays = Object.keys(stat).filter(k => stat[k].rv > 0 || stat[k].nw > 0).length;
+  const streak = streakDays();
+
+  $("statSub").textContent = "总体覆盖 " + cover + "% · 已掌握 " + tot.mastered + " / " + tot.total;
+
+  if (!tot.mastered && !tot.learned) {
+    $("statBody").innerHTML =
+      '<div class="sempty"><div class="sbig">📊</div>' +
+      "<h3>还没有学习记录</h3>" +
+      "<p>先在词网里给几个词标上「学习中 / 已掌握」，或者做一轮复习。<br>" +
+      "之后这里会长出每天的复习曲线、记忆保持率和下次复习的排期分布。</p>" +
+      '<div class="sacts"><button id="statGoRv" class="btn primary">🔁 开始复习</button>' +
+      '<button id="statGoList" class="btn">☰ 先看看单词列表</button></div></div>';
+    $("statGoRv").onclick = () => { closeStat(); startReview(); };
+    $("statGoList").onclick = () => { closeStat(); renderList(true); $("listModal").classList.remove("hidden"); };
+    return;
+  }
+
+  /* ---- KPI 四宫格 ---- */
+  const kpi = (label, val, unit, sub) =>
+    '<div class="skpi"><span class="kl">' + label + "</span>" +
+    "<b>" + val + (unit ? "<small>" + unit + "</small>" : "") + "</b>" +
+    '<span class="ks">' + sub + "</span></div>";
+
+  let html =
+    '<div class="skpis">' +
+      kpi("覆盖率", cover, "%", "已掌握 " + tot.mastered + " · 学习中 " + tot.learned + " · 未学 " + un) +
+      kpi("待复习", dueN, "个", "今天已复习 " + today.rv + " 张 · 新学 " + today.nw + " 个词") +
+      kpi("记忆保持率", keep === null ? "—" : keep, keep === null ? "" : "%",
+          rt.reps ? "累计复习 " + rt.reps + " 次 · 忘了 " + rt.laps + " 次" : "还没有复习记录") +
+      kpi("连续学习", streak, "天", "共学习 " + learnedDays + " 天 · 近 " + STAT_DAYS + " 天 " + sum14 + " 张") +
+      kpi("复习间隔", rt.ivlAvg, "天", "已掌握 " + rt.ivlN + " 个 · 最长 " + rt.ivlMax + " 天") +
+    "</div>";
+
+  /* ---- 近 14 天复习量（堆叠柱：忘了 / 有印象 / 记得 / 无明细） ---- */
+  const max = Math.max(1, ...days.map(d => d.rv));
+  const bars = days.map((d, k) => {
+    const rest = Math.max(0, d.rv - d.ok - d.mid - d.bad);   /* 回填估算的部分没有评分明细 */
+    const seg = (n, c) => n > 0
+      ? '<i style="height:' + (n / max * 100).toFixed(1) + "%;background:" + c + '"></i>' : "";
+    const isToday = k === days.length - 1;
+    const title = dayKey(d.d.getTime()) + " · " + (d.rv ? "复习 " + d.rv + " 张"
+        + (d.ok + d.mid + d.bad ? "（记得 " + d.ok + " · 有印象 " + d.mid + " · 忘了 " + d.bad + "）" : "（早期记录，无评分明细）")
+        : "没有复习")
+      + (d.nw ? " · 新学 " + d.nw + " 个词" : "");
+    return '<div class="scol' + (isToday ? " today" : "") + '" title="' + title + '">' +
+      '<div class="sbar">' + seg(d.bad, "#ef4444") + seg(d.mid, "#f59e0b") +
+      seg(d.ok, "#16a34a") + seg(rest, "#cbd5e1") + "</div>" +
+      '<span class="sx">' + (isToday ? "今天" : d.d.getDate()) + "</span></div>";
+  }).join("");
+
+  html +=
+    '<div class="scard">' +
+      '<div class="scardhd"><b>近 ' + STAT_DAYS + " 天复习量</b>" +
+      '<small>共 ' + sum14 + " 张 · 峰值 " + max + "</small>" +
+      '<span class="slegend">' +
+        '<i style="background:#ef4444"></i>忘了' +
+        '<i style="background:#f59e0b"></i>有印象' +
+        '<i style="background:#16a34a"></i>记得' +
+      "</span></div>" +
+      '<div class="schart">' + bars + "</div>" +
+    "</div>";
+
+  /* ---- 掌握进度 + 下次复习 并排 ---- */
+  const pct = n => (tot.total ? (n / tot.total * 100).toFixed(1) : 0) + "%";
+  const dueAll = buckets.reduce((a, b) => a + b.n, 0);
+
+  const srow = (color, label, n, denom, extra) =>
+    '<div class="srow"><span class="slab"><i style="background:' + color + '"></i>' + label + "</span>" +
+    '<span class="strack"><i style="width:' + (denom ? (n / denom * 100).toFixed(1) : 0) + "%;background:" + color + '"></i></span>' +
+    '<span class="snum">' + n + (extra || "") + "</span></div>";
+
+  html +=
+    '<div class="sgrid2">' +
+      '<div class="scard">' +
+        '<div class="scardhd"><b>掌握进度</b><small>' + tot.total + " 个词</small></div>" +
+        '<div class="stack big"><div class="m" style="width:' + (tot.mastered / tot.total * 100) + '%"></div>' +
+        '<div class="l" style="width:' + (tot.learned / tot.total * 100) + '%"></div></div>' +
+        '<div class="slist">' +
+          srow("#16a34a", "已掌握", tot.mastered, tot.total, ' <em>' + pct(tot.mastered) + "</em>") +
+          srow("#f59e0b", "学习中", tot.learned, tot.total, ' <em>' + pct(tot.learned) + "</em>") +
+          srow("#cbd5e1", "未学", un, tot.total, ' <em>' + pct(un) + "</em>") +
+        "</div>" +
+        '<div class="snote">覆盖率 = 已掌握 + 学习中 · 已掌握的词按间隔重复抽查</div>' +
+      "</div>" +
+      '<div class="scard">' +
+        '<div class="scardhd"><b>下次复习</b><small>已排期 ' + dueAll + " 个词</small></div>" +
+        '<div class="slist">' +
+          buckets.map(b => {
+            const pc = dueAll ? b.n / dueAll * 100 : 0;
+            /* 占比太小的档位不标百分数（否则一片「0%」反而看不清数量） */
+            return srow(b.c, b.t, b.n, Math.max(1, dueAll),
+              pc >= 1 ? ' <em>' + Math.round(pc) + "%</em>" : "");
+          }).join("") +
+        "</div>" +
+        '<div class="snote">' + (dueN ? "有 <b>" + dueN + "</b> 个词已经到期，随时可以复习"
+          : "目前没有到期的词，按计划走就行") + "</div>" +
+      "</div>" +
+    "</div>";
+
+  /* ---- 各词层进度（点一层直接跳过去） ---- */
+  let weak = null;
+  rows.forEach(r => { if (r.pct < 1 && (!weak || r.pct < weak.pct)) weak = r; });
+  html += '<div class="scard"><div class="scardhd"><b>各词层进度</b><small>点词层直接跳到该层学习</small></div>';
+  rows.forEach(r => {
+    html +=
+      '<div class="brow' + (weak && r.b === weak.b ? " weak" : "") + '" data-b="' + r.b + '">' +
+      '<div class="bl"><i class="bdot" style="background:' + bandColor(r.b) + '"></i>' +
+      BAND_NAMES[r.b] + "<small>" + r.total + " 词</small></div>" +
+      '<div class="stack"><div class="m" style="width:' + (r.mpct * 100) + '%"></div>' +
+      '<div class="l" style="width:' + ((r.pct - r.mpct) * 100) + '%"></div></div>' +
+      '<div class="bnum">掌握 <b>' + r.mastered + "</b> · 学习中 " + r.learned +
+      "<br>未学 " + (r.total - r.mastered - r.learned) + " · " + Math.round(r.pct * 100) + "%</div></div>";
+  });
+  html += "</div>";
+
+  $("statBody").innerHTML = html;
+  $("statBody").querySelectorAll(".brow").forEach(el => {
+    el.onclick = () => {
+      $("bandSel").value = el.dataset.b;
+      renderStats();
+      closeStat();
+      nextWord();
+    };
+  });
+}
+
+function openStat() { renderStat(); $("statModal").classList.remove("hidden"); }
+function closeStat() { $("statModal").classList.add("hidden"); }
+
+$("statBtn").onclick = openStat;
+$("statClose").onclick = closeStat;
+$("statModal").addEventListener("click", e => { if (e.target === $("statModal")) closeStat(); });
+$("statMapLink").onclick = () => { closeStat(); renderMap(); $("mapModal").classList.remove("hidden"); };
 
 /* ---------- word list ---------- */
 const LIST_CAP = 600;
@@ -2293,8 +2579,15 @@ function gradeCard(q) {
   if (!rv || rv.idx >= rv.queue.length) return;
   const i = rv.queue[rv.idx];
   const key = D.words[i];
+  const prevS = (prog[key] && prog[key].s) || 0;
   prog[key] = srsNext(prog[key] || {}, q, Date.now());
   saveProg();
+  const nowS = prog[key].s || 0;
+  /* 统计日志：张数 + 评分档位；顺带记下复习过程中发生的掌握度跃迁 */
+  statBump("rv");
+  statBump(q === 2 ? "ok" : q === 1 ? "mid" : "bad");
+  if (!prevS && nowS) statBump("nw");
+  if (prevS !== 2 && nowS === 2) statBump("mst");
   if (q === 2) rv.ok++;
   else if (q === 1) rv.mid++;
   else { rv.bad++; rv.again.push(i); }
@@ -2310,6 +2603,7 @@ function afterGrade() {
   if (!$("mapModal").classList.contains("hidden")) renderMap();
   if (!$("listModal").classList.contains("hidden")) renderList(true);
   if (!$("hardModal").classList.contains("hidden")) renderHard();
+  if (!$("statModal").classList.contains("hidden")) renderStat();
   if (current !== null) renderPanel(current);
   draw();
 }
@@ -2726,6 +3020,9 @@ document.addEventListener("keydown", e => {
     else $("pathModal").classList.add("hidden");
   }
   if (e.key === "m" || e.key === "M") { renderMap(); $("mapModal").classList.remove("hidden"); }
+  if (e.key === "s" || e.key === "S") {
+    if ($("statModal").classList.contains("hidden")) openStat(); else closeStat();
+  }
   if (e.key === "k" || e.key === "K") {
     if ($("hardModal").classList.contains("hidden")) { renderHard(); $("hardModal").classList.remove("hidden"); }
     else $("hardModal").classList.add("hidden");
@@ -2742,6 +3039,7 @@ document.addEventListener("keydown", e => {
   if (e.key === "Escape") {
     if (window.closeHelp) window.closeHelp();
     if (!$("hardModal").classList.contains("hidden")) $("hardModal").classList.add("hidden");
+    if (!$("statModal").classList.contains("hidden")) closeStat();
   }
 });
 
