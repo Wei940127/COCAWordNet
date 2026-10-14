@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v23";
+const APP_VERSION = "v24";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -1136,15 +1136,21 @@ function splitTag(s) {
       /* WordNet 的卫星义项标记 s（=形容词近似义）统一显示成 a.，避免用户看不懂 */
       return { tag: k === "s" ? "a." : m[1], dom: false, rest: s.slice(m[0].length) };
     }
+    /* 组合词性（vi.vt. / vt.vi. / vt.&vi. …）：每一段都是已知词性才接受 */
+    const parts = m[1].replace(/\.$/, "").split(/[.&]/).filter(Boolean).map(p => p.toLowerCase());
+    if (parts.length > 1 && parts.every(p => POS_ZH[p] !== undefined)) {
+      return { tag: m[1], dom: false, rest: s.slice(m[0].length), multi: parts };
+    }
   }
   return { tag: "", dom: false, rest: s };
 }
 /* 词性/领域小标签（无标签时给一个等宽占位，保证各列左缘对齐） */
-function chipHTML(tag, dom) {
+function chipHTML(tag, dom, multi) {
   if (!tag) return '<b class="pos blank"></b>';
   const k = tag.replace(/\.$/, "").replace(/&.*$/, "").toLowerCase();
-  const zh = dom ? (DOM_ZH[tag] || "") : (POS_ZH[k] || "");
-  const p = dom ? "dom" : posGroup(k);
+  let zh = dom ? (DOM_ZH[tag] || "") : (POS_ZH[k] || "");
+  if (multi && multi.length) zh = multi.map(p => POS_ZH[p]).filter(Boolean).join("／");
+  const p = dom ? "dom" : posGroup(multi && multi.length ? multi[0] : k);
   return '<b class="pos" data-p="' + p + '"' + (zh ? ' title="' + esc(zh) + '"' : "") + ">" + esc(tag) + "</b>";
 }
 function moreBtn(n) {
@@ -1175,7 +1181,7 @@ function fmtTrans(str, cap, fold) {
     const room = fold ? Math.max(0, cap - idx) : senses.length;
     /* 这一行一个义项都放不下 → 整行（含词性标签）先藏起来，避免行尾只剩个标签 */
     if (room === 0) {
-      rows.push('<div class="trow over">' + chipHTML(t.tag, t.dom) +
+      rows.push('<div class="trow over">' + chipHTML(t.tag, t.dom, t.multi) +
         '<span class="tsen">' + senses.map(s => '<i class="sn">' + esc(s) + "</i>").join("，") + "</span></div>");
       idx += senses.length;
       return;
@@ -1187,7 +1193,7 @@ function fmtTrans(str, cap, fold) {
     if (ovr.length) body += '<span class="ovr">，' +
       ovr.map(s => '<i class="sn">' + esc(s) + "</i>").join("，") + "</span>";
     idx += senses.length;
-    rows.push('<div class="trow">' + chipHTML(t.tag, t.dom) +
+    rows.push('<div class="trow">' + chipHTML(t.tag, t.dom, t.multi) +
       '<span class="tsen">' + body + "</span></div>");
   });
   if (!rows.length) return esc(raw.trim());
@@ -1203,7 +1209,7 @@ function fmtDef(str, cap) {
   lines.forEach(line => {
     const t = splitTag(line);
     const last = groups[groups.length - 1];
-    if (t.tag && (!last || last.tag !== t.tag)) groups.push({ tag: t.tag, dom: t.dom, items: [t.rest] });
+    if (t.tag && (!last || last.tag !== t.tag)) groups.push({ tag: t.tag, dom: t.dom, multi: t.multi, items: [t.rest] });
     else if (last) last.items.push(t.rest || line);
     else groups.push({ tag: "", dom: false, items: [t.rest || line] });
   });
@@ -1219,7 +1225,7 @@ function fmtDef(str, cap) {
       return '<span class="' + cls + '"><i class="num">' + (k + 1) + "</i>" + esc(s) + "</span>";
     });
     idx += items0.length;
-    return '<div class="dgrp' + (hide ? " over" : "") + '">' + chipHTML(g.tag, g.dom) +
+    return '<div class="dgrp' + (hide ? " over" : "") + '">' + chipHTML(g.tag, g.dom, g.multi) +
       '<div class="dl">' + items.join("") + "</div></div>";
   }).join("");
   /* 折叠计数：按总量给按钮文案 */
