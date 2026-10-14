@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v22";
+const APP_VERSION = "v23";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -1132,7 +1132,10 @@ function splitTag(s) {
   m = /^\s*([A-Za-z][A-Za-z.&]{0,10}\.)\s*/.exec(s);
   if (m) {
     const k = m[1].replace(/\.$/, "").replace(/&.*$/, "").toLowerCase();
-    if (POS_ZH[k] !== undefined) return { tag: m[1], dom: false, rest: s.slice(m[0].length) };
+    if (POS_ZH[k] !== undefined) {
+      /* WordNet 的卫星义项标记 s（=形容词近似义）统一显示成 a.，避免用户看不懂 */
+      return { tag: k === "s" ? "a." : m[1], dom: false, rest: s.slice(m[0].length) };
+    }
   }
   return { tag: "", dom: false, rest: s };
 }

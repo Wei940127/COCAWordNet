@@ -9,7 +9,7 @@
    Bump CACHE whenever app files or data.js change, so clients pick up the new version. */
 "use strict";
 
-const CACHE = "cocawn-v22";
+const CACHE = "cocawn-v23";
 
 /* Small app shell — must all fit in the install step. */
 const SHELL = [
