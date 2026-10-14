@@ -61,13 +61,14 @@
   </div>
 
   <div class="stats" id="stats"></div>
-  <button id="verPill" class="verpill" title="当前版本 · 点一下检查更新">v19</button>
+  <button id="verPill" class="verpill" title="当前版本 · 点一下检查更新">v20</button>
 </header>
 
 <main>
   <section class="graphcol">
     <div class="graphtools">
       <button id="focusBtn" class="btn" title="清除其他节点，只看当前词的关系">◎ 聚焦当前词</button>
+      <button id="pathBtn" class="btn" title="找两个词之间的关系链路（快捷键 G）">⇢ 路径查找</button>
       <button id="clearBtn" class="btn" title="清空画布">✕ 清空</button>
       <span id="trail" class="trail"></span>
       <span class="hint">点击任意节点：听发音 + 看音标和释义 · 上位词在上、下位词在下（拖右下「视角」可旋转）· 灰色小点=词表外词 · 滚轮缩放 · 拖拽平移</span>
@@ -199,6 +200,34 @@
     <div class="mfoot">
       <span>点击单词直接展开词网并朗读发音 · 颜色对应掌握度（灰=未学 · 琥珀=学习中 · 绿=已掌握）</span>
       <span class="mio" id="listMore"></span>
+    </div>
+  </div>
+</div>
+
+<div id="pathModal" class="modal hidden">
+  <div class="modalCard">
+    <div class="mhead">
+      <b>路径查找 <small>看两个词是怎么一步步连起来的</small></b>
+      <button id="pathClose" class="mclose" title="关闭">✕</button>
+    </div>
+
+    <div class="pathbody">
+      <div class="prow">
+        <input id="pathFrom" type="text" autocomplete="off" spellcheck="false" placeholder="起点，如 act">
+        <span class="parrow">→</span>
+        <input id="pathTo" type="text" autocomplete="off" spellcheck="false" placeholder="终点，如 government">
+      </div>
+      <div class="pacts">
+        <button id="pathGo" class="btn primary">查找路径</button>
+        <button id="pathSwap" class="btn mini" title="交换起点与终点">⇄ 交换</button>
+        <button id="pathClear" class="btn mini" title="退出路径模式，恢复普通词网">✕ 退出路径模式</button>
+      </div>
+      <div id="pathMsg" class="pmsg"></div>
+      <div id="pathResult" class="pres"></div>
+    </div>
+
+    <div class="mfoot">
+      <span>沿「同义词 / 反义词 / 上位词 / 下位词 / 同族派生 / 近义联想」做最短链路搜索（BFS）· 结果会画在词网上并编号高亮 · 路径模式下点节点只查看、不会打乱链路</span>
     </div>
   </div>
 </div>

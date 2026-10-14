@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v19";
+const APP_VERSION = "v20";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -117,6 +117,8 @@ const gGrid = g.append("g").attr("class", "grid");
 const gStalks = g.append("g").attr("class", "stalks");
 const gLinks = g.append("g");
 gLinks.attr("filter", "url(#fwGlow)");
+/* 路径模式：每跳连线中点的关系名标签（普通模式为空） */
+const gEdge = g.append("g").attr("class", "edgelbls");
 const gNodes = g.append("g");
 /* 单独的标签层，画在所有节点之上：
    否则后画的圆点会盖住先画节点下面的单词，看起来就像“线端点没有词”。 */
@@ -284,6 +286,7 @@ function assignLevels() {
 
 function expand(i, opts) {
   opts = opts || {};
+  exitPathMode();          /* 正常展开就离开路径模式（链路高亮不再有意义） */
   const me = ensureNode("w", i, 0);
   me.dist = 0;
   const groups = relsOf(i);
@@ -322,6 +325,7 @@ function cssId(id) { return "n" + id.replace(/[^a-zA-Z0-9]/g, "_"); }
 
 function focusCurrent() {
   if (current === null) return;
+  exitPathMode();
   const keep = new Set(["w:" + current]);
   (D.adj[current] || []).forEach(([t, r]) => keep.add(isWord(r) ? "w:" + r : "x:" + extraIdx(r)));
   nodes = nodes.filter(n => keep.has(n.id));
@@ -336,6 +340,7 @@ function focusCurrent() {
 }
 
 function clearGraph() {
+  exitPathMode();
   nodes = []; links = []; nodeMap.clear(); linkSet.clear();
   current = null; trail = [];
   gLinks.selectAll("*").remove();
@@ -349,6 +354,142 @@ function clearGraph() {
   document.getElementById("ph").classList.remove("hidden");
   renderTrail();
   try { localStorage.removeItem("coca10000.last"); } catch (e) {}
+}
+
+/* ---------- 路径查找：两个词之间沿关系的最短链路 ----------
+   比“直接告诉你它们是近义词”有意思得多：让学习者看见
+   「act → 同义词 play → 上位词 …」这样一跳一跳的语义联想。
+   做法是关系图上的 BFS：第一遍只走语义明确的关系（同义/反义/上下位/派生/近义），
+   找不到通路才允许经过「语义相关」（词共现，最弱的一类）。 */
+const PATH_MAX_HOPS = 6;
+let pathState = null;      // { steps, weak }
+let edgeSel = null;        // 连线中点上的关系名
+let extraMap = null;
+function extraIndexOf(word) {
+  if (!extraMap) { extraMap = new Map(); D.extra.forEach((w, k) => extraMap.set(w, k)); }
+  return extraMap.has(word) ? extraMap.get(word) : -1;
+}
+/* 输入解析：词表内 → 别名（词族联想）→ 词表外关联词 */
+function resolveWord(s) {
+  s = String(s == null ? "" : s).trim().toLowerCase();
+  if (!s) return null;
+  if (D.idx[s] !== undefined) return { kind: "w", i: D.idx[s], word: s };
+  if (D.alias && D.alias[s] !== undefined) {
+    const w = D.alias[s];
+    if (D.idx[w] !== undefined) return { kind: "w", i: D.idx[w], word: w };
+  }
+  const k = extraIndexOf(s);
+  if (k >= 0) return { kind: "x", i: k, word: s };
+  return null;
+}
+/* BFS：只展开词表内的词（词表外词没有任何向外的关系，是叶子），
+   所以词表外词只能作为最后一跳的终点 —— 比如 act → give up。 */
+function bfsPath(from, to, opts) {
+  opts = opts || {};
+  const maxDepth = opts.maxDepth || PATH_MAX_HOPS;
+  if (from.kind !== "w") return null;
+  const startId = "w:" + from.i, goalId = to.kind + ":" + to.i;
+  if (startId === goalId) return [{ kind: from.kind, i: from.i, t: null }];
+  const par = new Map([[startId, null]]);   // id -> [上一跳 id, 关系类型]
+  const q = [[from.i, 0]];
+  let head = 0, guard = 0;
+  while (head < q.length && guard < 300000) {
+    const cur = q[head++], i = cur[0], d = cur[1];
+    if (d >= maxDepth) continue;
+    const rels = D.adj[i] || [];
+    for (let k = 0; k < rels.length; k++) {
+      guard++;
+      const t = rels[k][0], r = rels[k][1];
+      if (!opts.weak && t === 6) continue;      /* 第一遍绕开最弱的「语义相关」 */
+      const kind = r >= 0 ? "w" : "x";
+      const j = r >= 0 ? r : extraIdx(r);
+      const id = kind + ":" + j;
+      if (par.has(id)) continue;
+      par.set(id, ["w:" + i, t]);
+      if (id === goalId) return tracePath(par, id);
+      if (kind === "x") continue;               /* 词表外词没有再往外的关系 */
+      q.push([j, d + 1]);
+    }
+  }
+  return null;
+}
+function tracePath(par, id) {
+  const ids = [];
+  let cur = id;
+  while (cur) { ids.unshift(cur); const p = par.get(cur); cur = p ? p[0] : null; }
+  return ids.map(sid => {
+    const c = sid.indexOf(":");
+    const p = par.get(sid);
+    return { kind: sid.slice(0, c), i: +sid.slice(c + 1), t: p ? p[1] : null };
+  });
+}
+/* 把链路画进词网：只画链路本身 —— 编号 + 关系名 + 加粗连线，每一跳都看得清 */
+function drawPath(steps, weak) {
+  exitPathMode();
+  nodes = []; links = []; nodeMap.clear(); linkSet.clear();
+  const seq = steps.map(s => ensureNode(s.kind, s.i, 0));
+  seq.forEach((n, k) => { n.dist = 0; n.pathIdx = k + 1; });
+  for (let k = 1; k < seq.length; k++) ensureLink(seq[k - 1], seq[k], steps[k].t);
+  current = steps[0].kind === "w" ? steps[0].i : null;
+  pathState = { steps: steps, weak: !!weak };
+  /* 均匀铺开 + 上下交错：链路先后顺序一眼可读，也不会被力导向揉成一团。
+     起点放上面一排、x 从图例右侧开始 —— 避开左下角图例和右下角视角控件 */
+  const W = width(), H = height(), n = seq.length;
+  const x0 = Math.max(320, W * 0.30), x1 = W * 0.92, amp = Math.min(H * 0.15, 115);
+  seq.forEach((nn, k) => {
+    nn.x = n === 1 ? (x0 + x1) / 2 : x0 + (x1 - x0) * k / (n - 1);
+    nn.y = H / 2 + (k % 2 ? amp : -amp);
+    nn.fx = nn.x; nn.fy = nn.y;
+  });
+  document.getElementById("emptyState").classList.add("hidden");
+  const b = document.getElementById("pathBtn");
+  if (b) b.classList.add("on");
+  assignLevels();
+  startSim();
+  if (current !== null) renderPanel(current);
+}
+function exitPathMode() {
+  if (!pathState) return;
+  pathState = null;
+  nodes.forEach(n => {
+    n.pathIdx = 0;
+    if (n.fx !== null && n.fx !== undefined) { /* 解除链路布局的钉位，恢复力导向 */
+      n.x = n.fx; n.y = n.fy; n.fx = null; n.fy = null;
+    }
+  });
+  if (edgeSel) { edgeSel.remove(); edgeSel = null; }
+  gEdge.selectAll("*").remove();
+  const b = document.getElementById("pathBtn");
+  if (b) b.classList.remove("on");
+  /* 标签文字/配色不归 paint() 管，这里得主动刷一次，否则编号会留在屏幕上 */
+  styleNodeLabels();
+  paint();
+}
+function renderEdgeLabels() {
+  if (!pathState) { gEdge.selectAll("*").remove(); edgeSel = null; return; }
+  const sel = gEdge.selectAll("text").data(links, l => l.source.id + "|" + l.target.id);
+  sel.exit().remove();
+  edgeSel = sel.enter().append("text")
+    .attr("class", "elbl").attr("text-anchor", "middle")
+    .style("pointer-events", "none")
+    .merge(sel)
+    .text(l => RMAP[l.t].name);
+  paintEdgeLabels();
+}
+function paintEdgeLabels() {
+  if (!edgeSel) return;
+  edgeSel
+    .attr("x", l => (l.source.px + l.target.px) / 2)
+    .attr("y", l => (l.source.py + l.target.py) / 2 - 7);
+}
+/* 节点标签的文字与配色（draw() 和退出路径模式时都要刷新，所以单独抽出来） */
+function styleNodeLabels() {
+  if (!labelSel) return;
+  labelSel
+    .attr("class", d => "lbl" + (d.id === "w:" + current ? " cur" : "") + (d.pathIdx ? " path" : ""))
+    .attr("fill", d => (d.pathIdx || d.id === "w:" + current ? "#1d4ed8"
+      : d.kind === "x" ? "#64748b" : "#334155"))
+    .text(d => (d.pathIdx ? d.pathIdx + ". " + d.word : d.word));
 }
 
 /* ---------- drawing ---------- */
@@ -528,15 +669,18 @@ function paint() {
     .attr("x1", l => l.source.px).attr("y1", l => l.source.py)
     .attr("x2", l => l.target.px).attr("y2", l => l.target.py)
     .attr("stroke-opacity", l => {
+      if (pathState) return 0.92;                 /* 路径模式：链路要跳出来 */
       const base = l.t === 6 ? 0.35 : 0.6;
       const k = ((l.source.ps || 1) + (l.target.ps || 1)) / 2;
       return Math.min(1, base * (0.5 + 0.62 * k));
     })
     .attr("stroke-width", l => {
+      if (pathState) return 3.4;
       const w = l.t === 4 ? 2.3 : l.t === 6 ? 1 : 1.8;
       const k = ((l.source.ps || 1) + (l.target.ps || 1)) / 2;
       return w * Math.max(0.7, Math.min(1.35, k));
     });
+  paintEdgeLabels();
   if (nodeSel) nodeSel
     .attr("transform", d => "translate(" + d.px + "," + d.py + ") scale(" + (d.ps || 1) + ")")
     .attr("opacity", d => lvlOpacity(d.lvl || 0));
@@ -613,8 +757,10 @@ function draw() {
   all.on("click", (e, d) => {
       e.stopPropagation();
       if (d.kind === "w") {
-        if (d.i !== current) { trail.push(current); if (trail.length > 24) trail.shift(); expand(d.i); }
-        renderPanel(d.i);
+        /* 路径模式下点节点只“看”，不展开 —— 否则链路会被新节点淹没 */
+        if (pathState) renderPanel(d.i);
+        else if (d.i !== current) { trail.push(current); if (trail.length > 24) trail.shift(); expand(d.i); }
+        else renderPanel(d.i);
       } else {
         /* out-of-list word: no network behind it — just show what we know */
         renderPanel(null, d);
@@ -653,14 +799,12 @@ function draw() {
     .attr("text-anchor", "middle")
     .style("pointer-events", "none")
     .merge(labelSel);
-  labelSel
-    .attr("class", d => "lbl" + (d.id === "w:" + current ? " cur" : ""))
-    .attr("fill", d => (d.id === "w:" + current ? "#1d4ed8"
-      : d.kind === "x" ? "#64748b" : "#334155"))
-    .text(d => d.word);
+  styleNodeLabels();
 
   paintGrid();
   paint();
+  /* 路径模式：在每跳连线的中点标出关系名（普通模式下这一步什么也不做） */
+  renderEdgeLabels();
 
   /* sim 只有在展开过词之后才存在：空画布上合并进度时 draw() 会被直接调用，
      这里必须判空，否则整段刷新会中断。 */
@@ -1503,6 +1647,74 @@ $("listBody").addEventListener("click", e => {
   speak(D.words[i]);
 });
 
+/* ---------- 路径查找弹窗 ---------- */
+(function initPathFinder() {
+  const modal = $("pathModal");
+  if (!modal) return;
+  const from = $("pathFrom"), to = $("pathTo"), msg = $("pathMsg"), res = $("pathResult");
+
+  function open(seed) {
+    const seedWord = seed || (current !== null ? D.words[current] : "");
+    if (seedWord) from.value = seedWord;
+    modal.classList.remove("hidden");
+    setTimeout(() => { (from.value && !to.value ? to : from).focus(); (from.value && !to.value ? to : from).select(); }, 40);
+  }
+  function find() {
+    const a = resolveWord(from.value), b = resolveWord(to.value);
+    msg.className = "pmsg"; res.innerHTML = "";
+    if (!a) { msg.textContent = "找不到起点词「" + from.value.trim() + "」"; msg.classList.add("err"); return; }
+    if (!b) { msg.textContent = "找不到终点词「" + to.value.trim() + "」（只支持 1 万词表和词表外关联词）"; msg.classList.add("err"); return; }
+    if (a.kind === "x") { msg.textContent = "「" + a.word + "」不在 1 万词表内，没有可展开的关系，不能当起点"; msg.classList.add("err"); return; }
+    if (b.kind === "w" && a.i === b.i) { msg.textContent = "起点和终点是同一个词"; msg.classList.add("err"); return; }
+    let steps = bfsPath(a, b, { weak: false, maxDepth: PATH_MAX_HOPS }), weak = false;
+    if (!steps) { steps = bfsPath(a, b, { weak: true, maxDepth: PATH_MAX_HOPS }); weak = true; }
+    if (!steps) {
+      msg.textContent = "在 " + PATH_MAX_HOPS + " 跳之内没有找到通路（这两个词可能确实没有语义关联）";
+      msg.classList.add("err");
+      return;
+    }
+    msg.innerHTML = "找到一条 <b>" + (steps.length - 1) + " 跳</b> 的链路" +
+      (weak ? "：语义关系内没有通路，这条链路含「语义相关」（弱关系）"
+            : "，全部由同义 / 反义 / 上下位 / 派生 / 近义联想构成");
+    renderPathResult(steps);
+    drawPath(steps, weak);
+  }
+  function renderPathResult(steps) {
+    res.innerHTML = '<div class="pchain">' + steps.map((s, k) => {
+      const w = nodeWord(s.kind, s.i);
+      const node = '<div class="pnode"><b>' + (k + 1) + "</b>" +
+        (s.kind === "w"
+          ? '<button class="pw" data-i="' + s.i + '" title="选中该词并朗读">' + esc(w) + "</button>"
+          : '<span class="pwx">' + esc(w) + '</span><i class="pxw">词表外</i>') + "</div>";
+      const link = k === 0 ? "" :
+        '<div class="plink" style="color:' + RMAP[s.t].color + '">↓ ' + RMAP[s.t].name + "</div>";
+      return link + node;
+    }).join("") + "</div>";
+    res.querySelectorAll(".pw").forEach(b => b.onclick = () => {
+      const i = +b.dataset.i;
+      renderPanel(i);
+      speak(D.words[i]);
+    });
+  }
+
+  $("pathBtn").onclick = () => open();
+  $("pathClose").onclick = () => modal.classList.add("hidden");
+  modal.addEventListener("click", e => { if (e.target === modal) modal.classList.add("hidden"); });
+  $("pathGo").onclick = find;
+  $("pathSwap").onclick = () => {
+    const t = from.value; from.value = to.value; to.value = t; find();
+  };
+  $("pathClear").onclick = () => {
+    exitPathMode();
+    msg.className = "pmsg"; res.innerHTML = "";
+    msg.textContent = "已退出路径模式，回到普通词网（点任意节点继续展开）";
+  };
+  [from, to].forEach(inp => inp.addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); find(); }
+  }));
+  window.COCA_PATH = { open: open, run: (a, b) => { from.value = a; to.value = b; find(); }, clear: exitPathMode };
+})();
+
 /* ---------- 跨设备迁移：合并规则 ---------- */
 
 /* 从导出的对象里挑出有效记录。保留每条记录自己的时间戳，
@@ -1732,6 +1944,10 @@ document.addEventListener("keydown", e => {
   if (e.key === "f" || e.key === "F") focusCurrent();
   if (e.key === "p" || e.key === "P") speakCurrent();
   if (e.key === "v" || e.key === "V") applyTilt(isFlat() ? 55 : 0, true);
+  if (e.key === "g" || e.key === "G") {
+    if ($("pathModal").classList.contains("hidden")) { $("pathBtn").onclick(); }
+    else $("pathModal").classList.add("hidden");
+  }
   if (e.key === "m" || e.key === "M") { renderMap(); $("mapModal").classList.remove("hidden"); }
   if (e.key === "l" || e.key === "L") {
     if ($("listModal").classList.contains("hidden")) { renderList(true); $("listModal").classList.remove("hidden"); }
