@@ -237,8 +237,39 @@ main { flex: 1; display: flex; min-height: 0; }
   border-radius: 4px; padding: 2px 6px; text-transform: uppercase;
 }
 /* 简洁信息行：紧跟单词 / 音标 / 🔊 之后的中文释义（词表内外一致） */
-.qtrans { white-space: pre-line; line-height: 1.7; font-size: 14px; color: var(--text); margin: -6px 0 16px; }
+.qtrans { line-height: 1.7; font-size: 14px; color: var(--text); margin: -6px 0 16px; }
 .qtrans.dim { color: #9ca3af; font-size: 13px; }
+/* 释义分列：左边一列词性/领域小标签，右边一列义项，左缘对齐 */
+.qtrans .trow, .def .dgrp { display: flex; gap: 8px; align-items: flex-start; margin: 2px 0; }
+.qtrans .pos, .def .pos {
+  flex: 0 0 auto; min-width: 30px; text-align: center;
+  font-style: normal; font-weight: 700; font-size: 10.5px; line-height: 15px;
+  border-radius: 5px; padding: 1px 6px; background: #f1f5f9; color: #64748b;
+  white-space: nowrap; margin-top: 4px;
+}
+.qtrans .pos.blank, .def .pos.blank { background: transparent; }
+.qtrans .pos[data-p="n"], .def .pos[data-p="n"] { background: #eef2ff; color: #4338ca; }
+.qtrans .pos[data-p="v"], .def .pos[data-p="v"] { background: #ecfdf5; color: #047857; }
+.qtrans .pos[data-p="a"], .def .pos[data-p="a"] { background: #f5f3ff; color: #6d28d9; }
+.qtrans .pos[data-p="adv"], .def .pos[data-p="adv"] { background: #fff7ed; color: #b45309; }
+.qtrans .pos[data-p="dom"], .def .pos[data-p="dom"] { background: #f8fafc; color: #94a3b8; box-shadow: inset 0 0 0 1px #e2e8f0; }
+.qtrans .tsen { flex: 1 1 auto; min-width: 0; }
+.qtrans .tsen i { font-style: normal; }
+.qtrans .dot { color: #cbd5e1; margin: 0 5px; }
+.def .dl { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.def .dsen { display: flex; gap: 7px; }
+.def .dsen .num {
+  font-style: normal; color: #94a3b8; font-size: 10.5px; font-weight: 700;
+  min-width: 13px; text-align: right; padding-top: 2px; flex: 0 0 auto;
+}
+/* 义项折叠：放不下的整行/整组（含词性标签）一起隐藏，部分超出的连 · 一起藏 */
+.qtrans:not(.expanded) .ovr, .qtrans:not(.expanded) .trow.over,
+.def:not(.expanded) .over, .def:not(.expanded) .dgrp.over { display: none; }
+.morebtn {
+  margin: 6px 0 2px 38px; border: 1px dashed var(--border); background: #fff; color: var(--muted);
+  border-radius: 6px; padding: 2px 9px; font-size: 11px; cursor: pointer; font-family: inherit;
+}
+.morebtn:hover { background: #f8fafc; color: #334155; border-color: #cbd5e1; }
 .mastery { display: flex; gap: 7px; margin-bottom: 16px; }
 .mbtn {
   flex: 1; padding: 8px 0; border: 1px solid var(--border); border-radius: 8px;

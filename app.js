@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v18";
+const APP_VERSION = "v19";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -861,6 +861,146 @@ $("dSpeak").onclick = speakCurrent;
 $("dPhon").style.cursor = "pointer";
 $("dPhon").onclick = speakCurrent;
 
+/* ---------- 释义排版：按词性 / 义项分列 ---------- */
+/* 数据格式：def 用「字面 \n」（反斜杠+n 两个字符！）分隔义项；
+   trans 用「；」分组、组内用「,」分义项，可能带 [计]/[化] 这类领域标记。 */
+const POS_ZH = {
+  n: "名词", v: "动词", vt: "及物动词", vi: "不及物动词", adj: "形容词", a: "形容词", s: "形容词",
+  adv: "副词", ad: "副词", r: "副词", prep: "介词", p: "介词", conj: "连词", c: "连词",
+  pron: "代词", num: "数词", art: "冠词", int: "感叹词", interj: "感叹词", aux: "助动词",
+  modal: "情态动词", abbr: "缩写", pl: "复数", det: "限定词", part: "分词", u: "不可数名词",
+  vbl: "动词性", auxil: "助动词"
+};
+const DOM_ZH = {
+  "计": "计算机", "化": "化学", "医": "医学", "法": "法律", "网络": "网络用语", "经": "经济",
+  "机": "机械", "电": "电子", "生物": "生物学", "物": "物理", "数": "数学", "农": "农业",
+  "军": "军事", "商": "商业", "冶": "冶金", "建": "建筑", "纺": "纺织", "印": "印刷", "海": "航海"
+};
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+/* 词性 → 配色组 */
+function posGroup(t) {
+  const k = (t || "").replace(/\./g, "").toLowerCase();
+  if (k === "n" || k === "u") return "n";
+  if (k === "v" || k === "vt" || k === "vi") return "v";
+  if (k === "a" || k === "s" || k === "adj") return "a";
+  if (k === "adv" || k === "ad" || k === "r") return "adv";
+  return "other";
+}
+/* 拆出开头的词性缩写（vt. / n. / a.）或领域标记（[计]） */
+function splitTag(s) {
+  let m = /^\s*\[([^\]]{1,8})\]\s*/.exec(s);
+  if (m) return { tag: m[1], dom: true, rest: s.slice(m[0].length) };
+  m = /^\s*([A-Za-z][A-Za-z.&]{0,10}\.)\s*/.exec(s);
+  if (m) {
+    const k = m[1].replace(/\.$/, "").replace(/&.*$/, "").toLowerCase();
+    if (POS_ZH[k] !== undefined) return { tag: m[1], dom: false, rest: s.slice(m[0].length) };
+  }
+  return { tag: "", dom: false, rest: s };
+}
+/* 词性/领域小标签（无标签时给一个等宽占位，保证各列左缘对齐） */
+function chipHTML(tag, dom) {
+  if (!tag) return '<b class="pos blank"></b>';
+  const k = tag.replace(/\.$/, "").replace(/&.*$/, "").toLowerCase();
+  const zh = dom ? (DOM_ZH[tag] || "") : (POS_ZH[k] || "");
+  const p = dom ? "dom" : posGroup(k);
+  return '<b class="pos" data-p="' + p + '"' + (zh ? ' title="' + esc(zh) + '"' : "") + ">" + esc(tag) + "</b>";
+}
+function moreBtn(n) {
+  const t = "显示全部 " + n + " 个义项 ▾";
+  return '<button class="morebtn" data-open="' + t + '">' + t + "</button>";
+}
+/* 中文释义：每个词性/领域一行，行内义项用 · 分隔（短释义读起来像词典） */
+function fmtTrans(str, cap, fold) {
+  cap = cap || 10; if (fold === undefined) fold = true;
+  if (!str) return "";
+  const raw = String(str).replace(/\\n/g, "；");
+  const frags = raw.split(/[；;]/).map(s => s.trim()).filter(Boolean);
+  if (!frags.length) return "";
+  /* 开头没有词性/领域标记的碎片，是上一组的续写，并回去 */
+  const groups = [];
+  frags.forEach(f => {
+    if (!splitTag(f).tag && groups.length) groups[groups.length - 1].push(f);
+    else groups.push([f]);
+  });
+  if (!groups.some(g => splitTag(g[0]).tag)) return esc(raw.trim());   /* 没有任何词性信息就按原文显示 */
+  let idx = 0;
+  const rows = [];
+  groups.forEach(g => {
+    const t = splitTag(g[0]);
+    let senses = t.rest.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+    for (let k = 1; k < g.length; k++) senses = senses.concat(g[k].split(/[,，]/).map(s => s.trim()).filter(Boolean));
+    if (!senses.length) return;
+    const room = fold ? Math.max(0, cap - idx) : senses.length;
+    /* 这一行一个义项都放不下 → 整行（含词性标签）先藏起来，避免行尾只剩个标签 */
+    if (room === 0) {
+      rows.push('<div class="trow over">' + chipHTML(t.tag, t.dom) +
+        '<span class="tsen">' + senses.map(s => '<i class="sn">' + esc(s) + "</i>").join('<span class="dot">·</span>') + "</span></div>");
+      idx += senses.length;
+      return;
+    }
+    const vis = senses.slice(0, room);
+    const ovr = senses.slice(room);
+    let body = vis.map(s => '<i class="sn">' + esc(s) + "</i>").join('<span class="dot">·</span>');
+    /* 超出部分连同它前面的 · 一起包起来，折叠时整段消失，不留孤零零的点 */
+    if (ovr.length) body += '<span class="ovr"><span class="dot">·</span>' +
+      ovr.map(s => '<i class="sn">' + esc(s) + "</i>").join('<span class="dot">·</span>') + "</span>";
+    idx += senses.length;
+    rows.push('<div class="trow">' + chipHTML(t.tag, t.dom) +
+      '<span class="tsen">' + body + "</span></div>");
+  });
+  if (!rows.length) return esc(raw.trim());
+  return rows.join("") + (fold && idx > cap ? moreBtn(idx) : "");
+}
+/* 英文释义：每个词性一组，组内义项逐条编号（长句必须独占一行） */
+function fmtDef(str, cap) {
+  cap = cap || 6;
+  if (!str) return "";
+  const lines = String(str).split(/\\n|\n/).map(s => s.trim()).filter(Boolean);
+  if (!lines.length) return "";
+  const groups = [];
+  lines.forEach(line => {
+    const t = splitTag(line);
+    const last = groups[groups.length - 1];
+    if (t.tag && (!last || last.tag !== t.tag)) groups.push({ tag: t.tag, dom: t.dom, items: [t.rest] });
+    else if (last) last.items.push(t.rest || line);
+    else groups.push({ tag: "", dom: false, items: [t.rest || line] });
+  });
+  let idx = 0;
+  const html = groups.map(g => {
+    const items0 = g.items.filter(Boolean);
+    if (!items0.length) return "";
+    /* 这一组一个义项都放不下时，连词性标签一起藏（不然只剩个空标签） */
+    const room = Math.max(0, cap - idx);
+    const hide = room === 0;
+    const items = items0.map((s, k) => {
+      const cls = (!hide && k >= room) ? "dsen over" : "dsen";
+      return '<span class="' + cls + '"><i class="num">' + (k + 1) + "</i>" + esc(s) + "</span>";
+    });
+    idx += items0.length;
+    return '<div class="dgrp' + (hide ? " over" : "") + '">' + chipHTML(g.tag, g.dom) +
+      '<div class="dl">' + items.join("") + "</div></div>";
+  }).join("");
+  /* 折叠计数：按总量给按钮文案 */
+  const total = groups.reduce((n, g) => n + g.items.filter(Boolean).length, 0);
+  if (!html) return "";
+  return html + (total > cap ? moreBtn(total) : "");
+}
+/* 义项过多时「显示全部 / 收起」——只切 CSS 类，不重排 DOM */
+function bindMore(root) {
+  if (!root) return;
+  root.classList.remove("expanded");
+  root.querySelectorAll(".morebtn").forEach(b => {
+    b.textContent = b.dataset.open;
+    b.onclick = ev => {
+      ev.stopPropagation();
+      const on = root.classList.toggle("expanded");
+      b.textContent = on ? "收起 ▴" : b.dataset.open;
+    };
+  });
+}
+
 /* ---------- out-of-list related words ---------- */
 /* D.extraPhon / D.extraTrans are ARRAYS parallel to D.extra — index, not word key */
 let extraCurrent = null;
@@ -883,10 +1023,12 @@ function renderExtraPanel(node) {
   document.querySelectorAll(".mbtn").forEach(b => b.classList.remove("on"));
   $("masteryRow").style.display = "none";
   const tr = extraTrans(i);
-  $("dTrans").textContent = tr || "（暂无释义，可点 🔊 听发音）";
+  const th = fmtTrans(tr, 10);
+  $("dTrans").innerHTML = th || "（暂无释义，可点 🔊 听发音）";
   $("dTrans").classList.toggle("dim", !tr);
+  bindMore($("dTrans"));
   $("bDef").style.display = "none";
-  $("dDef").textContent = "";
+  $("dDef").innerHTML = "";
   $("bMorph").style.display = "none";
   $("bColl").style.display = "none";
   $("dFamNote").textContent = "";
@@ -909,7 +1051,7 @@ function showExtInfo(j) {
     "<div class='exth'><b>" + w + "</b>" +
     (ph ? '<span class="phon">/' + ph + "</span>" : '<span class="muted">无音标</span>') +
     '<button class="mini-say" title="再听一次">🔊 再听一次</button></div>' +
-    "<div class='exttr'>" + (tr || "（暂无释义）") + "</div>" +
+    "<div class='exttr'>" + (fmtTrans(tr, 0, false) || "（暂无释义）") + "</div>" +
     "<div class='muted'>词表外关联词 · 不在 10000 词表内，无法展开词网</div>";
   const b = el.querySelector(".mini-say");
   if (b) b.onclick = () => speak(w);
@@ -940,10 +1082,14 @@ function renderPanel(i, extraNode) {
   });
 
   const tr = D.trans[i];
-  $("dTrans").textContent = tr || "（暂无释义）";
+  $("dTrans").innerHTML = fmtTrans(tr, 10) || "<span class='muted'>（暂无释义）</span>";
   $("dTrans").classList.toggle("dim", !tr);
-  $("dDef").textContent = D.def[i] || "";
-  $("bDef").style.display = D.def[i] ? "" : "none";
+  bindMore($("dTrans"));
+  /* 英文释义：按词性分组 + 逐条编号，超过 6 条先折叠 */
+  const defHTML = fmtDef(D.def[i], 6);
+  $("dDef").innerHTML = defHTML;
+  $("bDef").style.display = defHTML ? "" : "none";
+  bindMore($("dDef"));
 
   /* morphology: 词根拆解 + 同根词 */
   const w = D.words[i];
