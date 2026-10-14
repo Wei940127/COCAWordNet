@@ -145,6 +145,31 @@ main { flex: 1; display: flex; min-height: 0; }
 .legend.mini .lgbd { display: none; }
 .legend .li { display: flex; align-items: center; gap: 7px; }
 .legend .sw { width: 18px; height: 3px; border-radius: 2px; }
+/* 关系类型开关：点关系名只点亮该类连线，其余淡出（可多选） */
+.legend .lgr {
+  cursor: pointer; border-radius: 6px; border: 1px solid transparent;
+  padding: 1.5px 6px; margin: 0 -6px;
+  transition: background .12s, border-color .12s, opacity .12s;
+}
+.legend .lgr:hover { background: #f8fafc; }
+.legend .lgr:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
+.legend .lgr .lgn { flex: 1 1 auto; }
+.legend .lgr.on {
+  background: #eef2ff; border-color: #c7d2fe; color: #3730a3;
+  font-weight: 700; box-shadow: inset 0 0 0 1px rgba(255,255,255,.6);
+}
+.legend .lgr.on .sw { box-shadow: 0 0 0 2px rgba(255,255,255,.9); }
+.legend .lgr.off { opacity: .35; }
+.legend .lgr.off .sw { filter: grayscale(.55); }
+.legend .lgfoot {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-top: 5px; padding-top: 5px; border-top: 1px solid #eef2f7;
+}
+.legend .lghint { font-size: 10px; color: #a9b6c6; letter-spacing: .2px; }
+.legend .lgall {
+  width: auto; height: 18px; padding: 0 7px; font-size: 10.5px; border-radius: 6px;
+}
+.legend .lgall.active { background: #eef2ff; border-color: #c7d2fe; color: #4338ca; font-weight: 700; }
 /* 10 阶词频色带：高频 → 低频 */
 .legend .bandblock {
   margin-top: 5px; padding-top: 6px; border-top: 1px solid #eef2f7;

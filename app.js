@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v25";
+const APP_VERSION = "v26";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -35,6 +35,47 @@ const REL = [
 const RMAP = {}; REL.forEach(r => RMAP[r.t] = r);
 /* keep the strongest relation type when a pair has several */
 const TYPE_PRIORITY = [4, 1, 0, 2, 3, 5, 6];
+
+/* ---------- 关系类型开关 ----------
+   展开几个词之后连线会变得很密。图例里点某个关系名（可多选），
+   画面上就只把这几类连线点亮，其余连线 / 无关节点一起淡出 —— 立刻清爽。
+   空集合 = 全部显示（默认）。选择记在 localStorage，刷新后保留。 */
+const RF_KEY = "cocawn.relfilter";
+let relFilter = new Set();
+try {
+  const arr = JSON.parse(localStorage.getItem(RF_KEY) || "[]");
+  if (Array.isArray(arr)) arr.forEach(t => { if (RMAP[t]) relFilter.add(t); });
+} catch (e) {}
+const saveRelFilter = () => {
+  try { localStorage.setItem(RF_KEY, JSON.stringify([...relFilter])); } catch (e) {}
+};
+/* 与「点亮的关系」相连的节点集合；集合为空（= 未过滤）时为 null */
+let litNodes = null;
+function computeLit() {
+  litNodes = null;
+  if (!relFilter.size) return;
+  const s = new Set();
+  links.forEach(l => {
+    if (relFilter.has(l.t)) { s.add(l.source.id); s.add(l.target.id); }
+  });
+  if (current !== null) s.add("w:" + current);
+  litNodes = s;
+}
+/* 加了开关之后，未参与任何「点亮关系」的节点也一起淡出，视线不会被干扰 */
+const nodeDim = d => (litNodes && !litNodes.has(d.id) ? 0.22 : 1);
+/* 图例初始化后把自己的刷新函数注册进来（键盘快捷键也要能同步图例状态） */
+let relUI = null;
+const applyRelFilter = () => { saveRelFilter(); if (relUI) relUI(); computeLit(); paint(); };
+function toggleRelType(t) {
+  if (!RMAP[t]) return;
+  if (relFilter.has(t)) relFilter.delete(t); else relFilter.add(t);
+  applyRelFilter();
+}
+function clearRelFilter() {
+  if (!relFilter.size) return;
+  relFilter.clear();
+  applyRelFilter();
+}
 
 /* ---------- 立体布局：语义高度 ----------
    让词网从「平面」变成「立体」：上位词（更抽象）悬浮在当前词所在平面的上方，
@@ -751,6 +792,7 @@ function paint() {
     .attr("stroke-linecap", "round")
     .merge(stalkSel);
   stalkSel.attr("stroke", d => nodeBase(d));
+  stalkSel.attr("stroke-opacity", d => (litNodes && !litNodes.has(d.id) ? 0.07 : 0.30));
   stalkSel.each(function (d) {
     const a = projXYZ(d.x, d.y, lvlZ(d));
     const b = projXYZ(d.x, d.y, 0);
@@ -763,26 +805,32 @@ function paint() {
     .attr("x2", l => l.target.px).attr("y2", l => l.target.py)
     .attr("stroke-opacity", l => {
       if (pathState) return 0.92;                 /* 路径模式：链路要跳出来 */
+      const off = relFilter.size && !relFilter.has(l.t);
       const base = l.t === 6 ? 0.35 : 0.6;
       const k = ((l.source.ps || 1) + (l.target.ps || 1)) / 2;
-      return Math.min(1, base * (0.5 + 0.62 * k));
+      const v = base * (0.5 + 0.62 * k);
+      if (off) return 0.06;                       /* 没勾选的关系几乎淡出，只留一点点提示 */
+      /* 开了开关时，被勾选的线再亮一档，对比更明显 */
+      return relFilter.size ? Math.min(1, v * 1.45 + 0.16) : Math.min(1, v);
     })
     .attr("stroke-width", l => {
       if (pathState) return 3.4;
       const w = l.t === 4 ? 2.3 : l.t === 6 ? 1 : 1.8;
       const k = ((l.source.ps || 1) + (l.target.ps || 1)) / 2;
-      return w * Math.max(0.7, Math.min(1.35, k));
+      let v = w * Math.max(0.7, Math.min(1.35, k));
+      if (relFilter.size && !relFilter.has(l.t)) v *= 0.55;
+      return v;
     });
   paintEdgeLabels();
   if (nodeSel) nodeSel
     .attr("transform", d => "translate(" + d.px + "," + d.py + ") scale(" + (d.ps || 1) + ")")
-    .attr("opacity", d => lvlOpacity(d.lvl || 0));
+    .attr("opacity", d => lvlOpacity(d.lvl || 0) * nodeDim(d));
   if (labelSel) labelSel
     .attr("x", d => d.px)
     .attr("y", d => d.py + radius(d) * (d.ps || 1) + 12)
     .attr("font-size", d => (d.kind === "x" ? 10 : d.id === "w:" + current ? 14 : 11) *
       Math.max(0.86, Math.min(1.16, (d.ps || 1) * 0.75 + 0.25)))
-    .attr("opacity", d => lvlOpacity(d.lvl || 0));
+    .attr("opacity", d => lvlOpacity(d.lvl || 0) * nodeDim(d));
 }
 
 function draw() {
@@ -882,6 +930,9 @@ function draw() {
     .attr("stroke-width", l => (l.t === 4 ? 2.3 : l.t === 6 ? 1 : 1.8))
     .attr("stroke-dasharray", l => (l.t === 4 ? "4 3" : null));
   linkSel = le.merge(linkSel);
+
+  /* 关系开关：先算好「哪些节点还挂在点亮的关系上」，paint() 每帧直接查表 */
+  computeLit();
 
   /* 标签层：永远在节点之上，位置跟随节点。
      白色描边（paint-order: stroke）让文字压在连线上也读得清 */
@@ -1588,7 +1639,10 @@ function renderStats() {
     REL.map(r => {
       /* 上位词/下位词在立体视图里是有方向的：↑ 往上、↓ 往下 */
       const arrow = r.t === 2 ? " ↑" : r.t === 3 ? " ↓" : "";
-      return `<div class="li"><span class="sw" style="background:${r.color}"></span>${r.name}${arrow}</div>`;
+      return `<div class="li lgr" data-t="${r.t}" role="button" tabindex="0"` +
+        ` title="点击：只高亮「${r.name}」这一类（可多选，再点一次取消）">` +
+        `<span class="sw" style="background:${r.color}"></span>` +
+        `<span class="lgn">${r.name}${arrow}</span></div>`;
     }).join("") +
     `<div class="li" style="margin-top:5px;border-top:1px solid #eef2f7;padding-top:5px">
        <span class="sw" style="background:#16a34a"></span>已掌握
@@ -1607,6 +1661,10 @@ function renderStats() {
        <span class="sw" style="background:#e2e8f0;border:1px solid #cbd5e1"></span>词表外关联词（点开可看释义·听发音）
      </div>
      <div class="li" style="color:#94a3b8">↑ 上位词悬浮上方（紫环）· ↓ 下位词沉在下方（青环）· 其余关系同一平面</div>` +
+    `<div class="lgfoot">` +
+      `<span class="lghint" id="lgHint"></span>` +
+      `<button class="lgbtn lgall" id="lgRst" type="button" title="恢复显示全部关系（快捷键 0）">全部</button>` +
+    `</div>` +
     `</div>`;
 
   const btn = el.querySelector("#lgBtn");
@@ -1625,6 +1683,44 @@ function renderStats() {
     apply(mini);
     try { localStorage.setItem(LG_KEY, mini ? "1" : "0"); } catch (e) {}
   });
+
+  /* ---- 关系类型开关：点关系名只高亮这一类，其余淡出 ---- */
+  const hint = el.querySelector("#lgHint");
+  const rst = el.querySelector("#lgRst");
+  function syncRelUI() {
+    const on = relFilter.size > 0;
+    el.querySelectorAll(".lgr").forEach(row => {
+      const t = +row.dataset.t;
+      row.classList.toggle("on", relFilter.has(t));
+      row.classList.toggle("off", on && !relFilter.has(t));
+      row.setAttribute("aria-pressed", String(relFilter.has(t)));
+    });
+    rst.classList.toggle("active", on);
+    hint.textContent = on
+      ? "只看 " + relFilter.size + " 类"
+      : "点关系名只看该类型";
+  }
+  relUI = syncRelUI;                 /* 键盘快捷键切换时同步图例高亮 */
+  el.querySelector(".lgbd").addEventListener("click", ev => {
+    const row = ev.target.closest(".lgr");
+    if (!row) return;
+    ev.stopPropagation();
+    ev.preventDefault();
+    toggleRelType(+row.dataset.t);
+  });
+  /* 键盘可达：Tab 到某一类后回车/空格同样生效 */
+  el.querySelector(".lgbd").addEventListener("keydown", ev => {
+    const row = ev.target.closest(".lgr");
+    if (!row || (ev.key !== "Enter" && ev.key !== " ")) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    toggleRelType(+row.dataset.t);
+  });
+  rst.addEventListener("click", ev => {
+    ev.stopPropagation();
+    clearRelFilter();
+  });
+  syncRelUI();
 })();
 
 /* ---------- progress map ---------- */
@@ -2361,6 +2457,9 @@ document.addEventListener("keydown", e => {
     if ($("listModal").classList.contains("hidden")) { renderList(true); $("listModal").classList.remove("hidden"); }
     else $("listModal").classList.add("hidden");
   }
+  /* 关系类型开关：1–7 依次对应图例里的七种关系，0 = 全部显示 */
+  if (/^[1-7]$/.test(e.key)) { toggleRelType(+e.key - 1); e.preventDefault(); }
+  if (e.key === "0") { clearRelFilter(); e.preventDefault(); }
 });
 
 window.addEventListener("resize", () => {
