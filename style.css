@@ -430,6 +430,25 @@ main { flex: 1; display: flex; min-height: 0; }
   border-radius: 99px; font-size: 10px; padding: 1px 6px; font-weight: 700;
 }
 #reviewBtn.hasdue { border-color: #fca5a5; background: #fef2f2; color: #b91c1c; }
+/* 暂停复习去看词网：按钮变成「继续复习」，用琥珀色区分「有到期」的红色 */
+#reviewBtn.resume { border-color: #fcd34d; background: #fffbeb; color: #a16207; font-weight: 700; }
+#reviewBtn.resume .rvbadge { background: #d97706; }
+/* 词网里的「复习暂停」提示条（居中悬浮，不挡左下角图例和右下角视角控件） */
+.rvpause {
+  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+  z-index: 12; display: flex; align-items: center; gap: 9px;
+  background: rgba(255, 251, 235, .97); border: 1px solid #fcd34d;
+  border-radius: 99px; padding: 6px 8px 6px 14px; max-width: min(560px, 82%);
+  font-size: 12px; color: #92400e; box-shadow: 0 6px 18px rgba(146, 64, 14, .16);
+  animation: rvin .18s ease;
+}
+.rvpause.hidden { display: none; }
+.rvpause b { color: #7c2d12; }
+.rvpause .rvpause-x {
+  border: 0; background: transparent; color: #b45309; cursor: pointer;
+  font-size: 12px; line-height: 1; padding: 4px 6px; border-radius: 99px;
+}
+.rvpause .rvpause-x:hover { background: #fef3c7; }
 /* 面板里的复习排期提示 */
 .ddue { font-size: 11.5px; color: #94a3b8; margin: -8px 0 14px; line-height: 1.6; }
 .ddue.due { color: #b45309; font-weight: 600; }

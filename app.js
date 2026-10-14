@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v24";
+const APP_VERSION = "v25";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -1772,14 +1772,53 @@ $("listBody").addEventListener("click", e => {
 const RV_CAP = 60;            /* 单次会话最多这么多张：一次刷不完就先做这一批 */
 const RV_NEW = 10;            /* 「学新词」一次引入多少个 */
 let rv = null;                /* 当前会话状态 */
+let rvPaused = false;         /* 「在词网中看」暂时离开复习：会话保留，可随时回来继续 */
 
 function updateRvBadge() {
   const btn = $("reviewBtn");
   if (!btn) return;
+  /* 暂停中：按钮变成「继续复习」，带剩余张数角标，一眼能找回复习 */
+  if (rvPaused && rv && rv.idx < rv.queue.length) {
+    const left = rv.queue.length - rv.idx;
+    btn.classList.remove("hasdue");
+    btn.classList.add("resume");
+    btn.innerHTML = "▶ 继续复习" + '<i class="rvbadge">' + left + "</i>";
+    btn.title = "回到复习队列（第 " + (rv.idx + 1) + " / " + rv.queue.length + " 张，快捷键 R）";
+    return;
+  }
+  btn.classList.remove("resume");
   const n = dueCount();
   btn.classList.toggle("hasdue", n > 0);
   btn.innerHTML = "🔁 复习" + (n ? '<i class="rvbadge">' + (n > 99 ? "99+" : n) + "</i>" : "");
   btn.title = n ? "有 " + n + " 个词到期（快捷键 R）" : "复习队列 · 目前没有到期的词（快捷键 R）";
+}
+
+/* 暂时离开复习去看词网：卡片停在原处，回来时接着评（不重新生成队列） */
+function pauseReview() {
+  if (!rv || rv.idx >= rv.queue.length) return false;
+  const i = rv.queue[rv.idx];
+  $("reviewModal").classList.add("hidden");
+  rvPaused = true;
+  const bar = $("rvPauseBar");
+  if (bar) {
+    bar.classList.remove("hidden");
+    $("rvPauseTxt").innerHTML = "⏸ 复习已暂停 · 第 " + (rv.idx + 1) + " / " + rv.queue.length +
+      " 张 <b>" + esc(D.words[i]) + "</b> · 看完图回来接着评";
+  }
+  updateRvBadge();
+  return true;
+}
+
+function resumeReview() {
+  if (!rv) return false;
+  const was = rv.revealed;
+  rvPaused = false;
+  $("rvPauseBar").classList.add("hidden");
+  $("reviewModal").classList.remove("hidden");
+  if (rv.idx >= rv.queue.length) renderRvDone();
+  else { showCard(); if (was) revealCard(rv.queue[rv.idx]); }
+  updateRvBadge();
+  return true;
 }
 
 function startReview(words) {
@@ -1791,6 +1830,8 @@ function startReview(words) {
     if (q.length > RV_CAP) { rest = q.length - RV_CAP; q = q.slice(0, RV_CAP); }
   }
   rv = { queue: q, idx: 0, ok: 0, mid: 0, bad: 0, revealed: false, rest: rest, round: 1, again: [] };
+  rvPaused = false;
+  $("rvPauseBar").classList.add("hidden");
   $("reviewModal").classList.remove("hidden");
   showCard();
 }
@@ -1967,16 +2008,31 @@ function renderRvDone() {
 function closeReview() {
   $("reviewModal").classList.add("hidden");
   rv = null;
+  rvPaused = false;
+  const bar = $("rvPauseBar");
+  if (bar) bar.classList.add("hidden");
+  updateRvBadge();
   afterGrade();
 }
 
 $("reviewBtn").onclick = () => {
   if (!$("reviewModal").classList.contains("hidden")) return closeReview();
+  if (rvPaused) return resumeReview();
   startReview();
 };
 $("rvClose").onclick = closeReview;
 $("reviewModal").addEventListener("click", e => { if (e.target === $("reviewModal")) closeReview(); });
 $("rvSpeak").onclick = () => { if (rv && rv.idx < rv.queue.length) speak(D.words[rv.queue[rv.idx]]); };
+/* 「在词网中看」：把当前这张卡的词展开到图谱里（同/反/上下位一眼扫到），复习进度原样保留 */
+$("rvGraph").onclick = () => {
+  if (!rv || rv.idx >= rv.queue.length) return;
+  const w = D.words[rv.queue[rv.idx]];
+  if (!pauseReview()) return;
+  go(w);
+  try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch (e) {}
+};
+$("rvResume").onclick = () => resumeReview();
+$("rvPauseClose").onclick = () => closeReview();
 
 /* 复习时的键盘操作：空格/回车翻答案，1/2/3（或 ←↓→）评分，Esc 退出 */
 document.addEventListener("keydown", e => {
@@ -2291,7 +2347,7 @@ document.querySelectorAll(".quick button").forEach(b => b.onclick = () => go(b.d
 document.addEventListener("keydown", e => {
   if (!$("reviewModal").classList.contains("hidden")) return;   /* 复习界面自己有键盘操作 */
   if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
-  if (e.key === "r" || e.key === "R") { startReview(); return; }
+  if (e.key === "r" || e.key === "R") { if (rvPaused) resumeReview(); else startReview(); return; }
   if (e.key === "n" || e.key === "N") nextWord();
   if (e.key === "f" || e.key === "F") focusCurrent();
   if (e.key === "p" || e.key === "P") speakCurrent();

@@ -62,7 +62,7 @@
   </div>
 
   <div class="stats" id="stats"></div>
-  <button id="verPill" class="verpill" title="当前版本 · 点一下检查更新">v24</button>
+  <button id="verPill" class="verpill" title="当前版本 · 点一下检查更新">v25</button>
 </header>
 
 <main>
@@ -89,6 +89,12 @@
       <button id="tiltToggle" class="tbtn" title="在「平面视图」和「立体视图」之间切换（快捷键 V）">立体</button>
     </div>
     <div id="tooltip" class="tooltip hidden"></div>
+    <!-- 复习暂停提示：在词网里也能一键回复习 -->
+    <div id="rvPauseBar" class="rvpause hidden">
+      <span id="rvPauseTxt"></span>
+      <button id="rvResume" class="btn mini primary">继续复习 ▸</button>
+      <button id="rvPauseClose" class="rvpause-x" title="结束本轮复习">✕</button>
+    </div>
     <div id="emptyState" class="empty">
       <div class="emptyCard">
         <h2>从一个词开始，织出你的词网</h2>
@@ -245,7 +251,10 @@
     <div id="rvStage" class="rvstage"></div>
     <div class="mfoot">
       <span>间隔重复：记得 → 间隔翻倍；有印象 → 小幅延长；忘了 → 降一级、10 分钟后再来。只有你标记过掌握度的词会进队列。快捷键：空格翻答案 · 1 / 2 / 3 评分 · Esc 退出</span>
-      <span class="mio"><button id="rvSpeak" class="btn mini">🔊 再听一次</button></span>
+      <span class="mio">
+        <button id="rvSpeak" class="btn mini">🔊 再听一次</button>
+        <button id="rvGraph" class="btn mini" title="把这个词展开到词网里看它的同义词、反义词、上下位词（复习进度会保留，随时可回来继续）">🕸 在词网中看</button>
+      </span>
     </div>
   </div>
 </div>
