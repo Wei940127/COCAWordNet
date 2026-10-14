@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v20";
+const APP_VERSION = "v21";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -70,9 +70,102 @@ const learnedCount = () => { let n = 0; for (const k in prog) if (prog[k] && pro
 const setStatus = (i, s) => {
   /* 取消标记时保留一条 s=0 的记录（墓碑）而不是删除：
      否则另一台设备的旧数据在合并时会把这个词“复活”。 */
-  prog[D.words[i]] = { s, t: Date.now() };
+  const key = D.words[i];
+  const prev = prog[key] || {};
+  const now = Date.now();
+  const rec = Object.assign({}, prev, { s: s, t: now });
+  if (!s) {
+    /* 移出复习计划（dueList 只看 s>0 的记录，所以 due=0 不会被收进来） */
+    rec.due = 0; rec.ivl = 0; rec.reps = 0;
+  } else if (prev.s !== s) {
+    /* 手动改掌握度（不是通过复习）→ 给一个起步排期：
+       「学习中」表示这个词还在滚动学，立刻进复习队列（标记完就能开始复习，
+       否则新用户会看到一个空队列）；
+       「已掌握」则 4 天后再回来抽查。 */
+    rec.ivl = s === 2 ? 4 : 0;
+    rec.due = s === 2 ? now + 4 * DAY : now;
+  }
+  prog[key] = rec;
   saveProg();
 };
+
+/* ---------- 间隔重复（SRS） ----------
+   在「掌握度」之上再挂一个「下次复习时间」：每个词记一个当前间隔 ivl（天）、
+   到期时间 due、复习次数 reps、遗忘次数 laps。复习时按三档重新排期：
+
+     忘了   → 间隔清零、掌握度降一级、10 分钟后再来
+     有印象 → 间隔小幅延长（×1.3，保底 1 天），掌握度不降
+     记得   → 间隔翻倍（新词从 1 天起步），掌握度升一级
+
+   只有掌握度 > 0 的词才会进入复习队列；老版本的记录没有 due 字段，
+   一律视为「现在就到期」——升级后它们会自动排进第一轮复习。
+   数据全在本机 localStorage，和掌握度共用同一条记录（多出来的字段
+   老版本会忽略，互不影响）。 */
+const DAY = 86400000;
+const SRS_AGAIN_MS = 10 * 60000;   /* 忘了 → 10 分钟后再来一次 */
+const SRS_MAX_IVL = 600;           /* 最长间隔：600 天 */
+
+function srsNext(rec, q, now) {
+  const s = rec.s || 0, ivl = rec.ivl || 0;
+  const out = {
+    s: s, t: now, last: now,
+    ivl: ivl, due: now,
+    reps: (rec.reps || 0) + 1,
+    laps: rec.laps || 0
+  };
+  if (q === 0) {                       /* 忘了 */
+    out.s = Math.max(0, s - 1);
+    out.ivl = 0;
+    out.due = now + SRS_AGAIN_MS;
+    out.laps = out.laps + 1;
+  } else if (q === 1) {                /* 有印象 */
+    out.s = Math.max(1, s);
+    out.ivl = Math.min(SRS_MAX_IVL, Math.max(1, Math.round(ivl * 1.3)));
+    out.due = now + out.ivl * DAY;
+  } else {                             /* 记得 */
+    out.s = Math.min(2, s + 1);
+    out.ivl = Math.min(SRS_MAX_IVL, ivl ? Math.max(ivl + 1, Math.round(ivl * 2.2)) : 1);
+    out.due = now + out.ivl * DAY;
+  }
+  return out;
+}
+
+/* 到期时间：没标记过的词返回 null（不进复习队列） */
+const dueAtOf = i => { const r = prog[D.words[i]]; return (r && r.s) ? (r.due || 0) : null; };
+const isDue = (i, now) => { const d = dueAtOf(i); return d !== null && d <= (now || Date.now()); };
+
+/* 到期队列：越早到期越靠前；同一时刻按词频层（高频先复习） */
+function dueList(now) {
+  now = now || Date.now();
+  const out = [];
+  for (const k in prog) {
+    const v = prog[k];
+    if (!v || !v.s || (v.due || 0) > now) continue;
+    const i = D.idx[k];
+    if (i !== undefined) out.push(i);
+  }
+  out.sort((a, b) =>
+    ((prog[D.words[a]].due || 0) - (prog[D.words[b]].due || 0)) || (D.band[a] - D.band[b]));
+  return out;
+}
+function dueCount() {
+  const now = Date.now();
+  let n = 0;
+  for (const k in prog) { const v = prog[k]; if (v && v.s && (v.due || 0) <= now) n++; }
+  return n;
+}
+/* 人话版「下次复习」 */
+function dueText(i) {
+  const d = dueAtOf(i);
+  if (d === null) return "";
+  const ms = d - Date.now();
+  if (ms <= 0) return "现在到期";
+  if (ms < 3600000) return Math.round(ms / 60000) + " 分钟后";
+  if (ms < DAY) return Math.round(ms / 3600000) + " 小时后";
+  const days = Math.round(ms / DAY);
+  if (days <= 45) return days + " 天后";
+  return Math.round(days / 30) + " 个月后";
+}
 
 /* ---------- data helpers ---------- */
 const BAND_NAMES = { 1: "1k", 2: "2k", 3: "3k", 4: "4k", 5: "5k", 6: "6k", 7: "7k", 8: "8k", 9: "9k", 10: "10k" };
@@ -1166,6 +1259,7 @@ function renderExtraPanel(node) {
   $("dTags").innerHTML = "";
   document.querySelectorAll(".mbtn").forEach(b => b.classList.remove("on"));
   $("masteryRow").style.display = "none";
+  const _dd = $("dDue"); if (_dd) { _dd.style.display = "none"; _dd.textContent = ""; }
   const tr = extraTrans(i);
   const th = fmtTrans(tr, 10);
   $("dTrans").innerHTML = th || "（暂无释义，可点 🔊 听发音）";
@@ -1208,6 +1302,7 @@ function renderPanel(i, extraNode) {
   }
   extraCurrent = null;
   $("masteryRow").style.display = "";
+  const _dd = $("dDue"); if (_dd) _dd.style.display = "";
   $("ph").classList.add("hidden");
   $("detail").classList.remove("hidden");
   $("extInfo").classList.add("hidden");
@@ -1224,6 +1319,22 @@ function renderPanel(i, extraNode) {
   document.querySelectorAll(".mbtn").forEach(b => {
     b.classList.toggle("on", +b.dataset.s === statusOf(i));
   });
+
+  /* 复习排期提示：标记过掌握度的词会显示「下次复习 / 已到期」 */
+  const ddue = $("dDue");
+  if (ddue) {
+    const rec = prog[D.words[i]];
+    if (!rec || !rec.s) {
+      ddue.className = "ddue";
+      ddue.textContent = "标记「学习中 / 已掌握」后会自动排进复习计划";
+    } else {
+      const overdue = (rec.due || 0) <= Date.now();
+      ddue.className = "ddue" + (overdue ? " due" : "");
+      ddue.innerHTML = (overdue ? "🔔 复习已到期" : "⏱ 下次复习 " + dueText(i)) +
+        '<span class="ddim">已复习 ' + (rec.reps || 0) + " 次" +
+        (rec.laps ? " · 忘过 " + rec.laps + " 次" : "") + "</span>";
+    }
+  }
 
   const tr = D.trans[i];
   $("dTrans").innerHTML = fmtTrans(tr, 10) || "<span class='muted'>（暂无释义）</span>";
@@ -1454,6 +1565,7 @@ function renderStats() {
     `<span>共 ${total}</span>` +
     `<div class="bar"><div style="width:${pct}%"></div></div>` +
     `<span>${pct}%</span>`;
+  updateRvBadge();
 }
 
 /* ---------- legend ---------- */
@@ -1647,6 +1759,233 @@ $("listBody").addEventListener("click", e => {
   speak(D.words[i]);
 });
 
+/* ---------- 复习会话（间隔重复） ---------- */
+const RV_CAP = 60;            /* 单次会话最多这么多张：一次刷不完就先做这一批 */
+const RV_NEW = 10;            /* 「学新词」一次引入多少个 */
+let rv = null;                /* 当前会话状态 */
+
+function updateRvBadge() {
+  const btn = $("reviewBtn");
+  if (!btn) return;
+  const n = dueCount();
+  btn.classList.toggle("hasdue", n > 0);
+  btn.innerHTML = "🔁 复习" + (n ? '<i class="rvbadge">' + (n > 99 ? "99+" : n) + "</i>" : "");
+  btn.title = n ? "有 " + n + " 个词到期（快捷键 R）" : "复习队列 · 目前没有到期的词（快捷键 R）";
+}
+
+function startReview(words) {
+  const now = Date.now();
+  let q, rest = 0;
+  if (words) { q = words.slice(); }
+  else {
+    q = dueList(now);
+    if (q.length > RV_CAP) { rest = q.length - RV_CAP; q = q.slice(0, RV_CAP); }
+  }
+  rv = { queue: q, idx: 0, ok: 0, mid: 0, bad: 0, revealed: false, rest: rest, round: 1, again: [] };
+  $("reviewModal").classList.remove("hidden");
+  showCard();
+}
+
+/* 不看是否到期：把所有标记过掌握度的词按排期顺序过一遍（复习队列空时的兜底） */
+function startReviewAll() {
+  const out = [];
+  for (let i = 0; i < N; i++) if (statusOf(i)) out.push(i);
+  if (!out.length) return false;
+  out.sort((a, b) => ((prog[D.words[a]].due || 0) - (prog[D.words[b]].due || 0)) || (D.band[a] - D.band[b]));
+  startReview(out.slice(0, RV_CAP));
+  return true;
+}
+
+/* 「学新词」：从当前词层（没选词层就全库）随机抽 RV_NEW 个还没标记过的词 */
+function startNewWords(n) {
+  const b = +$("bandSel").value;
+  const pool = [];
+  for (let i = 0; i < N; i++) {
+    if (b && D.band[i] !== b) continue;
+    if (statusOf(i)) continue;
+    pool.push(i);
+  }
+  if (!pool.length) return false;
+  for (let k = pool.length - 1; k > 0; k--) {         /* 洗牌，避免每次都是同一批 */
+    const j = Math.floor(Math.random() * (k + 1));
+    const t = pool[k]; pool[k] = pool[j]; pool[j] = t;
+  }
+  startReview(pool.slice(0, n || RV_NEW));
+  return true;
+}
+
+function rvBadgeOf(s) {
+  return s === 2 ? '<span class="mchip s2">● 已掌握</span>'
+       : s === 1 ? '<span class="mchip s1">◐ 学习中</span>'
+       : '<span class="mchip s0">○ 未学</span>';
+}
+
+function showCard() {
+  const st = $("rvStage");
+  if (!rv) return;
+  if (rv.idx >= rv.queue.length) return renderRvDone();
+  const i = rv.queue[rv.idx];
+  const total = rv.queue.length;
+  rv.revealed = false;
+
+  $("rvFill").style.width = Math.round(rv.idx / total * 100) + "%";
+  $("rvSub").textContent = "第 " + (rv.idx + 1) + " / " + total + " 张" +
+    (rv.rest ? "（本次先做 " + total + " 张，还有 " + rv.rest + " 张到期）" : "") +
+    (rv.round > 1 ? " · 第 " + rv.round + " 轮" : "");
+
+  const ph = D.phon[i];
+  st.className = "rvstage";
+  st.innerHTML =
+    '<div class="rvcard">' +
+      '<div class="rvpos">' + rvBadgeOf(statusOf(i)) +
+        '<span class="mchip band" style="border-color:' + bandColor(D.band[i]) + '33;color:' + bandColor(D.band[i]) + '">' +
+        BAND_NAMES[D.band[i]] + " 词层</span></div>" +
+      '<div class="rvword">' + esc(D.words[i]) + "</div>" +
+      '<div class="rvphon">' + (ph ? "/" + esc(ph) + "/" : '<span class="muted">无音标</span>') + "</div>" +
+      '<div class="rvask">先在心里想想它的意思，再点下面核对 👇</div>' +
+      '<div id="rvAnswer" class="rvanswer"></div>' +
+      '<button id="rvShow" class="btn primary rvshow">显示答案 ▾</button>' +
+      '<div id="rvGrades" class="rvgrades"></div>' +
+    "</div>";
+  $("rvShow").onclick = () => revealCard(i);
+  speak(D.words[i]);        /* 卡片一出现就朗读（点按钮本身就是用户手势，iOS 也放行） */
+}
+
+function revealCard(i) {
+  if (!rv || rv.revealed) return;
+  rv.revealed = true;
+  const an = $("rvAnswer");
+  const tr = fmtTrans(D.trans[i], 10);
+  const df = fmtDef(D.def[i], 6);
+  an.className = "rvanswer on";
+  an.innerHTML =
+    '<div class="rvzh">' + (tr || "<span class='muted'>（暂无中文释义）</span>") + "</div>" +
+    (df ? '<div class="rven"><div class="rvh">英文释义</div>' + df + "</div>" : "");
+  bindMore(an);
+  $("rvShow").style.display = "none";
+  const g = $("rvGrades");
+  g.className = "rvgrades on";
+  g.innerHTML =
+    '<button class="gbtn g0" data-q="0">忘了<small>10 分钟后再来 · 降一级</small></button>' +
+    '<button class="gbtn g1" data-q="1">有印象<small>间隔小幅延长</small></button>' +
+    '<button class="gbtn g2" data-q="2">记得<small>间隔翻倍 · 升一级</small></button>';
+  g.querySelectorAll(".gbtn").forEach(b => b.onclick = () => gradeCard(+b.dataset.q));
+}
+
+function gradeCard(q) {
+  if (!rv || rv.idx >= rv.queue.length) return;
+  const i = rv.queue[rv.idx];
+  const key = D.words[i];
+  prog[key] = srsNext(prog[key] || {}, q, Date.now());
+  saveProg();
+  if (q === 2) rv.ok++;
+  else if (q === 1) rv.mid++;
+  else { rv.bad++; rv.again.push(i); }
+  rv.idx++;
+  afterGrade();
+  showCard();
+}
+
+/* 评完一张就把所有依赖进度的界面同步刷新（统计 / 地图 / 列表 / 面板 / 画布） */
+function afterGrade() {
+  renderStats();
+  updateRvBadge();
+  if (!$("mapModal").classList.contains("hidden")) renderMap();
+  if (!$("listModal").classList.contains("hidden")) renderList(true);
+  if (current !== null) renderPanel(current);
+  draw();
+}
+
+function dueSummaryLine() {
+  const n = dueCount();
+  return n ? "还有 <b>" + n + "</b> 个词到期，可以接着复习" : "今天的复习都做完了 ✅";
+}
+
+function renderRvDone() {
+  const st = $("rvStage");
+  $("rvFill").style.width = "100%";
+  $("rvSub").textContent = "本轮结束";
+
+  /* 忘了的词：趁热再过一遍（最多两轮，不无限循环） */
+  if (rv.again.length && rv.round < 2) {
+    const words = rv.again.slice();
+    st.innerHTML =
+      '<div class="rvdone"><div class="rvbig">🔁</div>' +
+      "<h3>第一遍完成</h3>" +
+      "<p>有 <b>" + words.length + "</b> 个词没想起来 —— 趁热再过一遍，记得最牢。</p>" +
+      '<div class="rvacts">' +
+        '<button id="rvAgain" class="btn primary">再过一遍这 ' + words.length + " 个词</button>" +
+        '<button id="rvFinish" class="btn">跳过，结束本轮</button>' +
+      "</div></div>";
+    $("rvAgain").onclick = () => {
+      rv.round++; rv.again = []; rv.queue = words; rv.idx = 0;
+      showCard();
+    };
+    $("rvFinish").onclick = () => { rv.again = []; renderRvDone(); };
+    return;
+  }
+
+  const total = rv.ok + rv.mid + rv.bad;
+  const rate = total ? Math.round((rv.ok + rv.mid * 0.5) / total * 100) : 0;
+  const due = dueCount(), learned = learnedCount();
+  const main = due
+    ? '<button id="rvMore" class="btn primary">' + (total ? "继续复习" : "开始复习") + "（" + due + " 个到期）</button>"
+    : (learned ? '<button id="rvAll" class="btn primary">复习全部学过的词（' + learned + " 个）</button>" : "");
+
+  st.innerHTML =
+    '<div class="rvdone"><div class="rvbig">' + (total ? "🎉" : "☕") + "</div>" +
+    "<h3>" + (total ? "本轮复习完成" : "今天没有到期的词") + "</h3>" +
+    (total
+      ? '<div class="rvsum">记得 <b class="g2c">' + rv.ok + "</b> · 有印象 <b class=\"g1c\">" + rv.mid +
+        '</b> · 忘了 <b class="g0c">' + rv.bad + "</b> · 得分 " + rate + "%</div>"
+      : "<p>标记过「学习中 / 已掌握」的词会按间隔重复自动排队，到点就会出现在这里。<br>" +
+        "想现在就开始练，可以「复习全部学过的词」或先学几个新词。</p>") +
+    '<p class="rvdone-note">' + dueSummaryLine() + "</p>" +
+    '<div class="rvacts">' + main +
+      '<button id="rvNew" class="btn">学 ' + RV_NEW + " 个新词</button>" +
+      '<button id="rvClose2" class="btn">结束</button>' +
+    "</div></div>";
+  const more = $("rvMore");
+  if (more) more.onclick = () => startReview();
+  const all = $("rvAll");
+  if (all) all.onclick = () => startReviewAll();
+  $("rvNew").onclick = () => {
+    if (!startNewWords(RV_NEW)) { $("rvSub").textContent = "当前词层已经没有未学的词了"; }
+  };
+  $("rvClose2").onclick = closeReview;
+}
+
+function closeReview() {
+  $("reviewModal").classList.add("hidden");
+  rv = null;
+  afterGrade();
+}
+
+$("reviewBtn").onclick = () => {
+  if (!$("reviewModal").classList.contains("hidden")) return closeReview();
+  startReview();
+};
+$("rvClose").onclick = closeReview;
+$("reviewModal").addEventListener("click", e => { if (e.target === $("reviewModal")) closeReview(); });
+$("rvSpeak").onclick = () => { if (rv && rv.idx < rv.queue.length) speak(D.words[rv.queue[rv.idx]]); };
+
+/* 复习时的键盘操作：空格/回车翻答案，1/2/3（或 ←↓→）评分，Esc 退出 */
+document.addEventListener("keydown", e => {
+  if ($("reviewModal").classList.contains("hidden")) return;
+  if (e.key === "Escape") { closeReview(); return; }
+  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+  if (!rv) return;
+  if ((e.key === " " || e.key === "Enter") && !rv.revealed && rv.idx < rv.queue.length) {
+    e.preventDefault();
+    revealCard(rv.queue[rv.idx]);
+    return;
+  }
+  if (!rv.revealed) return;
+  if (e.key === "1" || e.key === "ArrowLeft") gradeCard(0);
+  else if (e.key === "2" || e.key === "ArrowDown") gradeCard(1);
+  else if (e.key === "3" || e.key === "ArrowRight") gradeCard(2);
+});
+
 /* ---------- 路径查找弹窗 ---------- */
 (function initPathFinder() {
   const modal = $("pathModal");
@@ -1739,7 +2078,9 @@ function mergeIntoProg(incoming) {
     const v = incoming[k];
     const cur = prog[k];
     if (!cur || v.t > (cur.t || 0)) {
-      prog[k] = { s: v.s, t: v.t };
+      /* 同步码只带掌握度，不带复习计划 —— 合并时保留本机的排期字段
+         （due / ivl / reps / laps），免得一同步就把复习节奏清空。 */
+      prog[k] = Object.assign({}, cur || {}, { s: v.s, t: v.t });
       if (cur) updated++; else added++;
     }
   }
@@ -1939,7 +2280,9 @@ $("bandSel").onchange = () => {
 document.querySelectorAll(".quick button").forEach(b => b.onclick = () => go(b.dataset.w));
 
 document.addEventListener("keydown", e => {
+  if (!$("reviewModal").classList.contains("hidden")) return;   /* 复习界面自己有键盘操作 */
   if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+  if (e.key === "r" || e.key === "R") { startReview(); return; }
   if (e.key === "n" || e.key === "N") nextWord();
   if (e.key === "f" || e.key === "F") focusCurrent();
   if (e.key === "p" || e.key === "P") speakCurrent();

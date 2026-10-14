@@ -58,10 +58,11 @@
     <button id="mapBtn" class="btn" title="按词层查看学习进度（快捷键 M）">▦ 进度地图</button>
     <button id="listBtn" class="btn" title="查看当前词层的全部单词（快捷键 L）">☰ 单词列表</button>
     <button id="nextBtn" class="btn primary" title="随机跳到下一个未掌握的词（快捷键 N）">下一个词 ▸</button>
+    <button id="reviewBtn" class="btn" title="复习队列（快捷键 R）">🔁 复习</button>
   </div>
 
   <div class="stats" id="stats"></div>
-  <button id="verPill" class="verpill" title="当前版本 · 点一下检查更新">v20</button>
+  <button id="verPill" class="verpill" title="当前版本 · 点一下检查更新">v21</button>
 </header>
 
 <main>
@@ -132,6 +133,8 @@
         <button class="mbtn" data-s="1">◐ 学习中</button>
         <button class="mbtn" data-s="2">● 已掌握</button>
       </div>
+      <!-- 间隔重复：这个词什么时候该再复习一次 -->
+      <div id="dDue" class="ddue"></div>
 
       <div class="block" id="bDef" style="display:none">
         <h3>英文释义</h3>
@@ -228,6 +231,21 @@
 
     <div class="mfoot">
       <span>沿「同义词 / 反义词 / 上位词 / 下位词 / 同族派生 / 近义联想」做最短链路搜索（BFS）· 结果会画在词网上并编号高亮 · 路径模式下点节点只查看、不会打乱链路</span>
+    </div>
+  </div>
+</div>
+
+<div id="reviewModal" class="modal hidden">
+  <div class="modalCard rv">
+    <div class="mhead">
+      <b>复习 <small id="rvSub"></small></b>
+      <button id="rvClose" class="mclose" title="关闭（Esc）">✕</button>
+    </div>
+    <div class="rvbar"><div id="rvFill"></div></div>
+    <div id="rvStage" class="rvstage"></div>
+    <div class="mfoot">
+      <span>间隔重复：记得 → 间隔翻倍；有印象 → 小幅延长；忘了 → 降一级、10 分钟后再来。只有你标记过掌握度的词会进队列。快捷键：空格翻答案 · 1 / 2 / 3 评分 · Esc 退出</span>
+      <span class="mio"><button id="rvSpeak" class="btn mini">🔊 再听一次</button></span>
     </div>
   </div>
 </div>

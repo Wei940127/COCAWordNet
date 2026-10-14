@@ -369,6 +369,69 @@ main { flex: 1; display: flex; min-height: 0; }
 .mio { display: flex; gap: 6px; }
 .btn.mini { padding: 4px 10px; font-size: 11.5px; border-radius: 8px; }
 
+/* ---------- 复习（间隔重复） ---------- */
+.modalCard.rv { width: min(620px, 94vw); }
+.rvbar { height: 6px; border-radius: 99px; background: #eef2f7; overflow: hidden; margin: -2px 0 14px; }
+.rvbar #rvFill {
+  height: 100%; width: 0; border-radius: 99px;
+  background: linear-gradient(90deg, #60a5fa, #2563eb);
+  transition: width .25s ease;
+}
+.rvstage { min-height: 300px; display: flex; align-items: center; justify-content: center; }
+.rvcard { width: 100%; text-align: center; padding: 4px 2px 2px; }
+.rvpos { display: flex; justify-content: center; gap: 6px; margin-bottom: 14px; }
+.mchip {
+  display: inline-block; font-size: 11px; border: 1px solid var(--border);
+  border-radius: 99px; padding: 2px 9px; color: #64748b; white-space: nowrap;
+}
+.mchip.s2 { border-color: #86efac; background: #f0fdf4; color: #15803d; }
+.mchip.s1 { border-color: #fcd34d; background: #fffbeb; color: #b45309; }
+.mchip.s0 { border-color: #cbd5e1; background: #f8fafc; color: #475569; }
+.rvword { font-size: 40px; font-weight: 700; letter-spacing: .4px; color: #0f172a; line-height: 1.15; word-break: break-word; }
+.rvphon { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #64748b; font-size: 14px; margin-top: 7px; }
+.rvask { color: #9aa6b6; font-size: 12.5px; margin: 18px 0 4px; }
+.rvanswer { display: none; text-align: left; margin: 14px auto 0; max-width: 520px; }
+.rvanswer.on { display: block; animation: rvin .18s ease; }
+@keyframes rvin { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+.rvzh { font-size: 15px; line-height: 1.8; color: #0f172a; }
+.rven { margin-top: 12px; border-top: 1px dashed #e8eef6; padding-top: 10px; }
+.rvh { font-size: 11px; color: #9aa6b6; letter-spacing: .08em; margin-bottom: 6px; }
+.rvshow { margin-top: 20px; }
+.rvgrades { display: none; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 18px; }
+.rvgrades.on { display: grid; }
+.gbtn {
+  border: 1px solid var(--border); background: #fff; border-radius: 11px; padding: 11px 6px;
+  cursor: pointer; font-family: inherit; font-size: 13.5px; font-weight: 600; color: #334155;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  transition: transform .1s ease, box-shadow .15s ease, background .15s ease;
+}
+.gbtn small { font-weight: 400; font-size: 10.5px; color: #9aa6b6; }
+.gbtn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(15,23,42,.08); }
+.gbtn.g0:hover { border-color: #fca5a5; background: #fef2f2; color: #b91c1c; }
+.gbtn.g1:hover { border-color: #fcd34d; background: #fffbeb; color: #b45309; }
+.gbtn.g2:hover { border-color: #86efac; background: #f0fdf4; color: #15803d; }
+.rvdone { text-align: center; width: 100%; padding: 8px 0; }
+.rvbig { font-size: 40px; line-height: 1.2; }
+.rvdone h3 { margin: 8px 0 6px; font-size: 17px; color: #0f172a; }
+.rvdone p { color: #64748b; font-size: 13px; line-height: 1.75; margin: 6px 0; }
+.rvdone-note { color: #94a3b8 !important; font-size: 12.5px !important; }
+.rvacts { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 16px; }
+.rvsum { font-size: 13.5px; color: #475569; }
+.rvsum b { font-weight: 700; }
+.rvsum .g2c { color: #15803d; }
+.rvsum .g1c { color: #b45309; }
+.rvsum .g0c { color: #b91c1c; }
+/* 工具栏上的到期角标 */
+.rvbadge {
+  font-style: normal; margin-left: 5px; background: #dc2626; color: #fff;
+  border-radius: 99px; font-size: 10px; padding: 1px 6px; font-weight: 700;
+}
+#reviewBtn.hasdue { border-color: #fca5a5; background: #fef2f2; color: #b91c1c; }
+/* 面板里的复习排期提示 */
+.ddue { font-size: 11.5px; color: #94a3b8; margin: -8px 0 14px; line-height: 1.6; }
+.ddue.due { color: #b45309; font-weight: 600; }
+.ddue .ddim { color: #b9c3d2; font-weight: 400; margin-left: 6px; }
+
 /* ---------- 路径模式 ---------- */
 /* 连线中点的关系名：白描边，压在粗连线上也读得清 */
 #graph text.elbl {
