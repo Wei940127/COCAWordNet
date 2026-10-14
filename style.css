@@ -120,12 +120,19 @@ main { flex: 1; display: flex; min-height: 0; }
 /* 平面视图：层级光晕没有意义，整体隐藏 */
 #graph g.flatview circle.glow { display: none; }
 
+/* 图例区：两张卡片竖排——「词关系」（可点开关）在上、「说明」在下。
+   容器本身不带底色，卡片间空隙不挡画布点击（pointer-events 穿透） */
 .legend {
   position: absolute; bottom: 12px; left: 12px; z-index: 10;
-  background: rgba(255,255,255,.94); border: 1px solid var(--border);
-  border-radius: 11px; padding: 8px 11px; display: flex; flex-direction: column; gap: 4px;
+  display: flex; flex-direction: column; gap: 8px; align-items: flex-start;
   font-size: 11.5px; color: var(--muted);
   width: 244px; max-width: calc(100vw - 24px);   /* 收住宽度，说明文字换行，不被长句撑开 */
+  pointer-events: none;
+}
+.legend .lgcard {
+  pointer-events: auto; width: 100%;
+  background: rgba(255,255,255,.94); border: 1px solid var(--border);
+  border-radius: 11px; padding: 8px 11px; display: flex; flex-direction: column; gap: 4px;
   box-shadow: 0 6px 22px rgba(15,23,42,.10);
   -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
 }
@@ -143,9 +150,9 @@ main { flex: 1; display: flex; min-height: 0; }
 }
 .legend .lgbtn:hover { background: #f1f5f9; color: #334155; border-color: #cbd5e1; }
 /* 收起状态：只剩标题行的小胶囊 */
-.legend.mini { padding: 5px 9px; gap: 0; }
-.legend.mini .lghd { gap: 8px; margin: 0; }
-.legend.mini .lgbd { display: none; }
+.legend .lgcard.mini { padding: 5px 9px; gap: 0; width: auto; }
+.legend .lgcard.mini .lghd { gap: 8px; margin: 0; }
+.legend .lgcard.mini .lgbd { display: none; }
 .legend .li { display: flex; align-items: center; gap: 7px; }
 .legend .sw { width: 18px; height: 3px; border-radius: 2px; }
 /* 关系类型开关：两列小药丸，点一下只亮该类连线（可多选）；
@@ -623,7 +630,8 @@ main { flex: 1; display: flex; min-height: 0; }
   .btn, select { min-height: 38px; }
   .graphtools .hint { display: none; }
   .graphtools { top: max(8px, env(safe-area-inset-top)); }
-  .legend { font-size: 10.5px; padding: 7px 9px; max-width: 62vw; }
+  .legend { font-size: 10.5px; max-width: 62vw; }
+  .legend .lgcard { padding: 7px 9px; }
   .dhead h1 { font-size: 26px; }
   .stats { font-size: 11px; }
   /* 窄屏：视角条压缩，滑块短一些，避免和图例挤在一起 */

@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v27";
+const APP_VERSION = "v28";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -1628,14 +1628,13 @@ function renderStats() {
   updateRvBadge();
 }
 
-/* ---------- legend ---------- */
+/* ---------- legend：两张卡片 ----------
+   「词关系」= 可点的 7 类关系开关；「说明」= 掌握度/词频层/词表外词等静态说明。
+   分开放才不互相干扰：关系卡片常驻可点，说明卡片看完就能收起。 */
 (function legend() {
-  const el = $("legend");
-  const LG_KEY = "cocawn.legend.mini";
-  el.innerHTML =
-    `<div class="lghd"><span class="lgt">图例</span>` +
-    `<button class="lgbtn" id="lgBtn" type="button" title="收起图例">−</button></div>` +
-    `<div class="lgbd">` +
+  const wrap = $("legend");
+
+  const relBody =
     `<div class="lgrs">` +
     REL.map(r => {
       /* 上位词/下位词在立体视图里是有方向的：↑ 往上、↓ 往下 */
@@ -1648,7 +1647,13 @@ function renderStats() {
         `<span class="lgn">${r.name}${arrow}</span></div>`;
     }).join("") +
     `</div>` +
-    `<div class="li" style="margin-top:5px;border-top:1px solid #eef2f7;padding-top:5px">
+    `<div class="lgfoot">` +
+      `<span class="lghint" id="lgHint"></span>` +
+      `<button class="lgbtn lgall" id="lgRst" type="button" title="恢复显示全部关系（快捷键 0）">全部</button>` +
+    `</div>`;
+
+  const helpBody =
+    `<div class="li">
        <span class="sw" style="background:#16a34a"></span>已掌握
        <span class="sw" style="background:#f59e0b;margin-left:6px"></span>学习中
        <span class="sw" style="background:#cbd5e1;margin-left:6px"></span>未学
@@ -1661,43 +1666,51 @@ function renderStats() {
        </div>
        <div class="bandscale"><span>1k 高频</span><span>← 词频层 →</span><span>10k 低频</span></div>
      </div>
-     <div class="li" style="margin-top:5px;border-top:1px solid #eef2f7;padding-top:5px">
+     <div class="li" style="margin-top:4px;border-top:1px solid #eef2f7;padding-top:5px">
        <span class="sw" style="background:#e2e8f0;border:1px solid #cbd5e1"></span>词表外关联词（点开看释义·发音）
      </div>
-     <div class="li" style="color:#94a3b8">↑ 上位词悬浮上方（紫环）· ↓ 下位词沉在下方（青环）· 其余关系同一平面</div>` +
-    `<div class="lgfoot">` +
-      `<span class="lghint" id="lgHint"></span>` +
-      `<button class="lgbtn lgall" id="lgRst" type="button" title="恢复显示全部关系（快捷键 0）">全部</button>` +
-    `</div>` +
-    `</div>`;
+     <div class="li" style="color:#94a3b8">↑ 上位词悬浮上方（紫环）· ↓ 下位词沉在下方（青环）· 其余关系同一平面</div>`;
 
-  const btn = el.querySelector("#lgBtn");
-  const apply = mini => {
-    el.classList.toggle("mini", mini);
-    btn.textContent = mini ? "+" : "−";
-    btn.title = mini ? "展开图例" : "收起图例";
-    btn.setAttribute("aria-expanded", String(!mini));
-  };
-  let mini = false;
-  try { mini = localStorage.getItem(LG_KEY) === "1"; } catch (e) {}
-  apply(mini);
-  btn.addEventListener("click", ev => {
-    ev.stopPropagation();
-    mini = !mini;
+  /* 造一张可收起的卡片；mini 状态各自记在 localStorage */
+  function mkCard(title, bodyHTML, key) {
+    const card = document.createElement("div");
+    card.className = "lgcard";
+    card.innerHTML =
+      `<div class="lghd"><span class="lgt">${title}</span>` +
+      `<button class="lgbtn lgmin" type="button" title="收起">−</button></div>` +
+      `<div class="lgbd">` + bodyHTML + `</div>`;
+    wrap.appendChild(card);
+    const btn = card.querySelector(".lghd .lgbtn");
+    const apply = mini => {
+      card.classList.toggle("mini", mini);
+      btn.textContent = mini ? "+" : "−";
+      btn.title = mini ? "展开" + title : "收起" + title;
+      btn.setAttribute("aria-expanded", String(!mini));
+    };
+    let mini = false;
+    try { mini = localStorage.getItem(key) === "1"; } catch (e) {}
     apply(mini);
-    try { localStorage.setItem(LG_KEY, mini ? "1" : "0"); } catch (e) {}
-  });
+    btn.addEventListener("click", ev => {
+      ev.stopPropagation();
+      mini = !mini;
+      apply(mini);
+      try { localStorage.setItem(key, mini ? "1" : "0"); } catch (e) {}
+    });
+    return card;
+  }
+  const relCard = mkCard("词关系", relBody, "cocawn.legend.mini");
+  mkCard("说明", helpBody, "cocawn.help.mini");
 
   /* ---- 关系类型开关：点关系名只高亮这一类，其余淡出 ---- */
-  const hint = el.querySelector("#lgHint");
-  const rst = el.querySelector("#lgRst");
+  const hint = relCard.querySelector("#lgHint");
+  const rst = relCard.querySelector("#lgRst");
   const rgba = (hex, a) => {
     const n = parseInt(hex.slice(1), 16);
     return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
   };
   function syncRelUI() {
     const on = relFilter.size > 0;
-    el.querySelectorAll(".lgr").forEach(row => {
+    relCard.querySelectorAll(".lgr").forEach(row => {
       const t = +row.dataset.t;
       const c = RMAP[t].color, sel = relFilter.has(t);
       row.classList.toggle("on", sel);
@@ -1713,7 +1726,7 @@ function renderStats() {
       : "点关系名只看该类型";
   }
   relUI = syncRelUI;                 /* 键盘快捷键切换时同步图例高亮 */
-  el.querySelector(".lgbd").addEventListener("click", ev => {
+  relCard.querySelector(".lgbd").addEventListener("click", ev => {
     const row = ev.target.closest(".lgr");
     if (!row) return;
     ev.stopPropagation();
@@ -1721,7 +1734,7 @@ function renderStats() {
     toggleRelType(+row.dataset.t);
   });
   /* 键盘可达：Tab 到某一类后回车/空格同样生效 */
-  el.querySelector(".lgbd").addEventListener("keydown", ev => {
+  relCard.querySelector(".lgbd").addEventListener("keydown", ev => {
     const row = ev.target.closest(".lgr");
     if (!row || (ev.key !== "Enter" && ev.key !== " ")) return;
     ev.preventDefault();
