@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v29";
+const APP_VERSION = "v30";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -1743,6 +1743,15 @@ function renderStats() {
     `<div class="lghd"><span class="lgt">说明</span>` +
     `<button class="lgbtn lgx" type="button" title="关闭（Esc）">✕</button></div>` +
     `<div class="lgbd">` +
+    /* 怎么用：把原来学习屏上方那行小字搬进来，并补成一份简短使用说明 */
+    `<div class="hsec">怎么用</div>` +
+    `<div class="hlist">
+       <div><i>1</i>点任意节点：朗读美式发音，右侧看音标与释义</div>
+       <div><i>2</i>点相邻节点继续向外扩，像滚雪球一样把相关词连成一片</div>
+       <div><i>3</i>线太密看不清：点左下「词关系」里的关系名，只看这一类</div>
+       <div><i>4</i>滚轮缩放、拖拽平移；双击节点重新展开它</div>
+     </div>` +
+    `<div class="hsec">图例</div>` +
     `<div class="li">
        <span class="sw" style="background:#16a34a"></span>已掌握
        <span class="sw" style="background:#f59e0b;margin-left:6px"></span>学习中
@@ -1756,10 +1765,16 @@ function renderStats() {
        </div>
        <div class="bandscale"><span>1k 高频</span><span>← 词频层 →</span><span>10k 低频</span></div>
      </div>
-     <div class="li" style="margin-top:4px;border-top:1px solid #eef2f7;padding-top:5px">
+     <div class="li" style="margin-top:4px">
        <span class="sw" style="background:#e2e8f0;border:1px solid #cbd5e1"></span>词表外关联词（点开看释义·发音）
      </div>
-     <div class="li" style="color:#94a3b8">↑ 上位词悬浮上方（紫环）· ↓ 下位词沉在下方（青环）· 其余关系同一平面</div>` +
+     <div class="li" style="color:#94a3b8">↑ 上位词悬浮上方（紫环）· ↓ 下位词沉在下方（青环）· 其余关系同一平面（拖右下「视角」可旋转）</div>` +
+    `<div class="hsec">快捷键</div>` +
+    `<div class="hkeys">
+       <span><b>R</b>复习</span><span><b>N</b>下一个词</span><span><b>G</b>路径查找</span>
+       <span><b>M</b>进度地图</span><span><b>L</b>单词列表</span><span><b>V</b>立体/平面</span>
+       <span><b>P</b>发音</span><span><b>H</b>本说明</span><span><b>1–7</b>关系过滤</span><span><b>0</b>全部显示</span>
+     </div>` +
     `</div>`;
   document.body.appendChild(pop);
 

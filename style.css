@@ -199,7 +199,8 @@ main { flex: 1; display: flex; min-height: 0; }
 /* 说明浮层：贴在顶栏「ⓘ 说明」按钮旁边，看完点别处即收起 */
 .helppop {
   position: fixed; z-index: 96;
-  width: 244px; max-width: calc(100vw - 16px);
+  width: 262px; max-width: calc(100vw - 16px);
+  max-height: min(78vh, 620px); overflow-y: auto;      /* 内容多了可滚动，不顶出屏幕 */
   background: rgba(255,255,255,.98); border: 1px solid var(--border);
   border-radius: 11px; padding: 8px 11px; display: flex; flex-direction: column; gap: 4px;
   box-shadow: 0 12px 34px rgba(15,23,42,.16);
@@ -207,6 +208,27 @@ main { flex: 1; display: flex; min-height: 0; }
 }
 .helppop { animation: hpop .14s ease-out; }
 @keyframes hpop { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+/* 小节标题：怎么用 / 图例 / 快捷键 */
+.lgbox .hsec {
+  font-size: 10px; font-weight: 700; color: #94a3b8; letter-spacing: .6px;
+  margin: 3px 0 1px;
+}
+.lgbox .hsec:not(:first-child) { border-top: 1px solid #eef2f7; padding-top: 6px; }
+/* 步骤列表：编号小圆点 + 文字 */
+.lgbox .hlist { display: flex; flex-direction: column; gap: 3px; }
+.lgbox .hlist > div { display: flex; align-items: flex-start; gap: 6px; line-height: 1.45; }
+.lgbox .hlist i {
+  flex: 0 0 auto; width: 14px; height: 14px; margin-top: 1.5px; border-radius: 50%;
+  background: #eef2ff; color: #6366f1; font-style: normal; font-size: 9.5px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+/* 快捷键：小圆角键盘片 */
+.lgbox .hkeys { display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.lgbox .hkeys span { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; color: #7b8794; }
+.lgbox .hkeys b {
+  font-weight: 700; color: #475569; background: #f1f5f9; border: 1px solid #e2e8f0;
+  border-radius: 4px; padding: 0 4px; font-size: 10px; line-height: 15px;
+}
 /* 按钮处于打开状态 */
 #helpBtn.on { background: #eef2ff; border-color: #c7d2fe; color: #4338ca; }
 
@@ -642,11 +664,11 @@ main { flex: 1; display: flex; min-height: 0; }
   .searchwrap { flex: 1 1 100%; max-width: none; order: 5; }
   .controls { flex-wrap: wrap; }
   .btn, select { min-height: 38px; }
-  .graphtools .hint { display: none; }
   .graphtools { top: max(8px, env(safe-area-inset-top)); }
   .legend { max-width: 62vw; }
   .lgbox { font-size: 10.5px; }
   .lgbox .lgcard { padding: 7px 9px; }
+  .helppop { width: 258px; }
   .dhead h1 { font-size: 26px; }
   .stats { font-size: 11px; }
   /* 窄屏：视角条压缩，滑块短一些，避免和图例挤在一起 */
