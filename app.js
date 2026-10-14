@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v32";
+const APP_VERSION = "v33";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -1673,6 +1673,7 @@ function renderStats() {
     `<div class="bar"><div style="width:${pct}%"></div></div>` +
     `<span>${pct}%</span>`;
   updateRvBadge();
+  updateHardBadge();
 }
 
 /* ---------- legend：词关系卡片 ----------
@@ -1797,6 +1798,7 @@ function renderStats() {
        <div><i>2</i>点相邻节点继续向外扩，像滚雪球一样把相关词连成一片</div>
        <div><i>3</i>线太密看不清：点左下「词关系」里的关系名，只看这一类</div>
        <div><i>4</i>滚轮缩放、拖拽平移；双击节点重新展开它</div>
+       <div><i>5</i>老记不住的词会自动收进顶栏「⚠ 难词」，攒够了一起攻克</div>
      </div>` +
     `<div class="hsec">图例</div>` +
     `<div class="li">
@@ -1820,7 +1822,7 @@ function renderStats() {
     `<div class="hkeys">
        <span><b>R</b>复习</span><span><b>N</b>下一个词</span><span><b>G</b>路径查找</span>
        <span><b>M</b>进度地图</span><span><b>L</b>单词列表</span><span><b>V</b>立体/平面</span>
-       <span><b>P</b>发音</span><span><b>H</b>本说明</span><span><b>1–7</b>关系过滤</span><span><b>0</b>全部显示</span>
+       <span><b>P</b>发音</span><span><b>H</b>本说明</span><span><b>K</b>难词清单</span><span><b>1–7</b>关系过滤</span><span><b>0</b>全部显示</span>
      </div>` +
     `</div>`;
   document.body.appendChild(pop);
@@ -1998,6 +2000,141 @@ $("listBody").addEventListener("click", e => {
   speak(D.words[i]);
 });
 
+/* ---------- 难词清单（错词本） ----------
+   把复习里反复出问题的词聚成一册，方便集中攻克。两类词会被收进来：
+
+     · 忘过的 —— 复习评分时选过「忘了」的词（laps 记的就是遗忘次数）
+     · 卡住的 —— 还停在「学习中」、已经复习 3 次以上却没升到「已掌握」
+
+   难度分 = 遗忘次数为主 + 掌握度越低越难 + 复习次数微调。
+   数据全部来自已有的复习记录（prog），不需要额外存储，也不需要手动维护。 */
+const HARD_STUCK_REPS = 3;      /* 复习满几次还没升上去，才算「卡住」 */
+
+function hardRows() {
+  const out = [];
+  for (const k in prog) {
+    const v = prog[k];
+    if (!v || !v.s) continue;                  /* s=0 是同步用的墓碑，不算学过 */
+    const i = D.idx[k];
+    if (i === undefined) continue;
+    const laps = v.laps || 0, reps = v.reps || 0, s = v.s || 0;
+    const forgot = laps > 0;
+    const stuck = !forgot && s === 1 && reps >= HARD_STUCK_REPS;
+    if (!forgot && !stuck) continue;
+    out.push({
+      i: i, laps: laps, reps: reps, s: s,
+      forgot: forgot, stuck: stuck,
+      score: laps * 10 + (2 - Math.min(2, s)) * 4 + Math.min(reps, 10)
+    });
+  }
+  out.sort((a, b) =>
+    (b.score - a.score) || (b.laps - a.laps) || (D.band[a.i] - D.band[b.i]));
+  return out;
+}
+
+/* 顶栏角标：一眼看到有多少难词攒着 */
+function updateHardBadge() {
+  const btn = $("hardBtn");
+  if (!btn) return;
+  const n = hardRows().length;
+  btn.classList.toggle("has", n > 0);
+  btn.innerHTML = "⚠ 难词" + (n ? '<i class="rvbadge">' + (n > 99 ? "99+" : n) + "</i>" : "");
+  btn.title = n
+    ? "难词清单：有 " + n + " 个词老是记不住（快捷键 K）"
+    : "难词清单：目前还没有难词（快捷键 K）";
+}
+
+let hardMode = "all", hardQuery = "";
+const HARD_CAP = 400;
+
+/* 按当前的筛选条件（分段 + 搜索框）筛出要显示的难词 */
+function hardFiltered() {
+  const all = hardRows();
+  let rows = hardMode === "forgot" ? all.filter(r => r.forgot)
+           : hardMode === "stuck" ? all.filter(r => r.stuck)
+           : all;
+  const q = hardQuery.trim().toLowerCase();
+  if (q) {
+    rows = rows.filter(r =>
+      D.words[r.i].toLowerCase().indexOf(q) >= 0 ||
+      String(D.trans[r.i] || "").toLowerCase().indexOf(q) >= 0);
+  }
+  return { all: all, rows: rows };
+}
+
+function renderHard() {
+  const st = hardFiltered();
+  const nF = st.all.filter(r => r.forgot).length;
+  const nS = st.all.filter(r => r.stuck).length;
+
+  $("hardSub").textContent = st.rows.length
+    ? "共 " + st.rows.length + " 个词 · 忘过 " + nF + " · 卡住 " + nS
+    : (st.all.length ? "没有符合筛选的词" : "还没有难词");
+
+  const clean = s => String(s || "").replace(/\\[rnt]/g, " ").replace(/["<>]/g, "").replace(/\s+/g, " ").trim();
+  const show = st.rows.slice(0, HARD_CAP);
+
+  $("hardBody").innerHTML = show.length
+    ? show.map(r => {
+        const i = r.i;
+        const zh = clean(D.trans[i]).split(/[；;]/)[0].slice(0, 28);
+        const why = r.forgot
+          ? '<span class="hwhy bad">忘过 ' + r.laps + " 次</span>"
+          : '<span class="hwhy warn">复习 ' + r.reps + " 次仍学习中</span>";
+        const tip = BAND_NAMES[D.band[i]] + " 词层 · 第 " + BAND_RANGE[D.band[i]] + " 词 · " +
+          clean(D.trans[i]).slice(0, 90) + " · 点击跳到词网并发音";
+        return '<div class="hrow' + (i === current ? " on" : "") + '" data-i="' + i + '" title="' + tip + '">' +
+          '<span class="hw">' + esc(D.words[i]) + "</span>" +
+          '<span class="mchip band" style="border-color:' + bandColor(D.band[i]) + '33;color:' +
+            bandColor(D.band[i]) + '">' + BAND_NAMES[D.band[i]] + "</span>" +
+          rvBadgeOf(r.s) + why +
+          '<span class="hzh">' + zh + "</span>" +
+          '<span class="hdue">' + (dueText(i) || "") + "</span></div>";
+      }).join("") +
+      (st.rows.length > show.length
+        ? '<div class="hmore">清单很长，先显示前 ' + show.length + " 个 · 用上面的搜索框找具体的词</div>"
+        : "")
+    : '<div class="hempty">' +
+        (st.all.length
+          ? "没有符合筛选条件的词"
+          : "还没有难词 🎉<br>复习时评过「忘了」的词会自动收进这里，方便集中攻克。") +
+      "</div>";
+
+  const btn = $("hardReview");
+  const n = Math.min(st.rows.length, RV_CAP);
+  btn.disabled = !n;
+  btn.textContent = n ? "🔁 复习这些词（" + n + "）" : "🔁 复习这些词";
+}
+
+$("hardBtn").onclick = () => { renderHard(); $("hardModal").classList.remove("hidden"); };
+$("hardClose").onclick = () => $("hardModal").classList.add("hidden");
+$("hardModal").addEventListener("click", e => {
+  if (e.target === $("hardModal")) $("hardModal").classList.add("hidden");
+});
+$("hardFilter").addEventListener("input", e => { hardQuery = e.target.value; renderHard(); });
+$("hardSeg").addEventListener("click", e => {
+  const btn = e.target.closest("button[data-f]");
+  if (!btn) return;
+  hardMode = btn.dataset.f;
+  $("hardSeg").querySelectorAll("button").forEach(x => x.classList.toggle("on", x === btn));
+  renderHard();
+});
+$("hardBody").addEventListener("click", e => {
+  const row = e.target.closest(".hrow");
+  if (!row) return;
+  const i = +row.dataset.i;
+  $("hardModal").classList.add("hidden");
+  go(i);
+  speak(D.words[i]);
+});
+/* 把清单里的词排成一队直接开练（沿用复习界面，评分照常写回排期） */
+$("hardReview").onclick = () => {
+  const rows = hardFiltered().rows;
+  if (!rows.length) return;
+  $("hardModal").classList.add("hidden");
+  startReview(rows.slice(0, RV_CAP).map(r => r.i));
+};
+
 /* ---------- 复习会话（间隔重复） ---------- */
 const RV_CAP = 60;            /* 单次会话最多这么多张：一次刷不完就先做这一批 */
 const RV_NEW = 10;            /* 「学新词」一次引入多少个 */
@@ -2172,6 +2309,7 @@ function afterGrade() {
   updateRvBadge();
   if (!$("mapModal").classList.contains("hidden")) renderMap();
   if (!$("listModal").classList.contains("hidden")) renderList(true);
+  if (!$("hardModal").classList.contains("hidden")) renderHard();
   if (current !== null) renderPanel(current);
   draw();
 }
@@ -2387,6 +2525,7 @@ function refreshProgressViews() {
   renderStats();
   if (!$("mapModal").classList.contains("hidden")) renderMap();
   if (!$("listModal").classList.contains("hidden")) renderList(true);
+  if (!$("hardModal").classList.contains("hidden")) renderHard();
   if (current !== null) renderPanel(current);
   draw();
 }
@@ -2587,6 +2726,10 @@ document.addEventListener("keydown", e => {
     else $("pathModal").classList.add("hidden");
   }
   if (e.key === "m" || e.key === "M") { renderMap(); $("mapModal").classList.remove("hidden"); }
+  if (e.key === "k" || e.key === "K") {
+    if ($("hardModal").classList.contains("hidden")) { renderHard(); $("hardModal").classList.remove("hidden"); }
+    else $("hardModal").classList.add("hidden");
+  }
   if (e.key === "l" || e.key === "L") {
     if ($("listModal").classList.contains("hidden")) { renderList(true); $("listModal").classList.remove("hidden"); }
     else $("listModal").classList.add("hidden");
@@ -2596,7 +2739,10 @@ document.addEventListener("keydown", e => {
   if (e.key === "0") { clearRelFilter(); e.preventDefault(); }
   /* 说明浮层：H 开关、Esc 关闭 */
   if (e.key === "h" || e.key === "H") { if (window.toggleHelp) window.toggleHelp(); }
-  if (e.key === "Escape" && window.closeHelp) window.closeHelp();
+  if (e.key === "Escape") {
+    if (window.closeHelp) window.closeHelp();
+    if (!$("hardModal").classList.contains("hidden")) $("hardModal").classList.add("hidden");
+  }
 });
 
 window.addEventListener("resize", () => {

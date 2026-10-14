@@ -622,6 +622,39 @@ main { flex: 1; display: flex; min-height: 0; }
 .lw.on { outline: 2px solid #1d4ed8; outline-offset: 1px; }
 .lbody .lempty { color: #9ca3af; font-size: 13px; padding: 20px 4px; width: 100%; text-align: center; }
 
+/* ---------- 难词清单（错词本） ---------- */
+#hardBtn.has { border-color: #fca5a5; background: #fef2f2; color: #b91c1c; }
+#hardFilter {
+  flex: 1 1 200px; min-width: 160px; padding: 7px 11px; font-size: 13px;
+  border: 1px solid var(--border); border-radius: 8px; outline: none; color: var(--text);
+}
+#hardFilter:focus { border-color: #93c5fd; box-shadow: 0 0 0 3px #dbeafe; }
+.hbody {
+  max-height: 62vh; overflow: auto;
+  display: flex; flex-direction: column; gap: 5px;
+  padding: 2px; border-top: 1px solid #eef2f7; padding-top: 12px;
+}
+.hrow {
+  display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+  padding: 7px 11px; border-radius: 9px; cursor: pointer; font-size: 13px;
+  background: #fff; border: 1px solid #eef2f7; border-left: 3px solid #fca5a5;
+  transition: .1s;
+}
+.hrow:hover { border-color: #93c5fd; border-left-color: #93c5fd; transform: translateX(2px); }
+.hrow.on { outline: 2px solid #1d4ed8; outline-offset: 1px; }
+.hrow .hw { font-weight: 700; color: #1e1b4b; }
+.hrow .hzh {
+  color: var(--muted); font-size: 12px; flex: 1 1 140px; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.hrow .hdue { color: #94a3b8; font-size: 11px; margin-left: auto; white-space: nowrap; }
+.hwhy { font-size: 11px; border-radius: 6px; padding: 1px 7px; white-space: nowrap; }
+.hwhy.bad { background: #fee2e2; color: #b91c1c; }
+.hwhy.warn { background: #fef3c7; color: #b45309; }
+.hempty { color: #9ca3af; font-size: 13px; padding: 26px 4px; text-align: center; line-height: 1.9; }
+.hmore { color: #94a3b8; font-size: 11.5px; text-align: center; padding: 8px 0 2px; }
+#hardReview:disabled { opacity: .5; cursor: not-allowed; }
+
 /* ---------- boot loader ---------- */
 .loader {
   position: fixed; inset: 0; z-index: 100;
@@ -683,6 +716,7 @@ main { flex: 1; display: flex; min-height: 0; }
   .lgbox { font-size: 10.5px; }
   .lgbox .lgcard { padding: 7px 9px; }
   .helppop { width: 258px; }
+  .hrow { font-size: 12.5px; padding: 6px 9px; gap: 7px; }
   .dhead h1 { font-size: 26px; }
   .stats { font-size: 11px; }
   /* 窄屏：视角条压缩，滑块短一些，避免和图例挤在一起 */
