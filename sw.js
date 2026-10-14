@@ -1,23 +1,27 @@
 /* COCAWordNet service worker — offline app shell + word data.
 
-   Design note: the 7.5 MB data.js is deliberately NOT precached inside the
-   install event. A long install delays activation, and on a slow mobile link
-   it can be interrupted, leaving the app with no active service worker at all.
-   Instead the shell installs instantly, then the big file is warmed into the
-   cache in the background right after activation.
+   Design note (v35): 词库被拆成「骨架 + 10 个词层块 + 词表外词两份」。
+   骨架（data_core.js，约 200KB gzip）跟着 shell 一起预缓存，首屏用它就能渲染；
+   各词层块由页面按需插 <script> 取用，走下面的 fetch 处理器时会自动写进缓存。
+   放 install 里全量预缓存会拖慢激活、慢网下还可能中断 —— 所以一概不预缓存大文件。
 
-   Bump CACHE whenever app files or data.js change, so clients pick up the new version. */
+   Bump CACHE whenever app files or data files change, so clients pick up the new version. */
 "use strict";
 
-const CACHE = "cocawn-v34";
+const CACHE = "cocawn-v35";
 
-/* Small app shell — must all fit in the install step. */
+/* Small app shell — must all fit in the install step.
+   data_core.js（骨架：词表/词层/下标/别名，约 200KB gzip）是启动必需，放这里预缓存；
+   10 个词层块（data_b01..b10）和词表外词那两份由页面按需拉取，
+   经过 fetch 处理器时会被自动写进缓存，所以离线只覆盖「看过/预取过」的词层 —— 
+   首次进入后页面的预取队列会把 10 块补齐，正常使用一个会话就全了。 */
 const SHELL = [
   "./",
   "./index.html",
   "./app.js",
   "./style.css",
   "./d3.min.js",
+  "./data_core.js",
   "./manifest.webmanifest",
   "./icon.png",
   "./icon-192.png",
@@ -26,9 +30,9 @@ const SHELL = [
   "./favicon.ico"
 ];
 
-/* The heavy word database — warmed asynchronously, never blocking install.
-   ex.js (10000 条例句, 1.3 MB) rides along the same off-thread warm-up. */
-const WARM = ["./data.js", "./ex.js"];
+/* 词层数据块（data_b01..b10 / data_extra.js / data_extra_def.js）不在这里预热：
+   页面按需取用，经过下面的 fetch 处理器时自动进缓存，省掉用户没看过的词层的流量。 */
+const WARM = [];
 
 /* Fetch a URL and store it, reusing the HTTP cache when possible.
    Never rejects: a failed warm-up must not break anything. */

@@ -848,3 +848,33 @@ main { padding-bottom: env(safe-area-inset-bottom); }
   .sx { font-size: 9.5px; }
 }
 
+/* ---------- 词层数据按需载入的提示 ---------- */
+.partload {
+  display: flex; align-items: center; gap: 7px;
+  color: #94a3b8; font-size: 12.5px; line-height: 1.7;
+}
+.partload .spin, .pmsg .spin, .rvask .spin {
+  display: inline-block; width: 12px; height: 12px; border-radius: 50%;
+  border: 2px solid #dbe3ef; border-top-color: #2563eb;
+  animation: spin .8s linear infinite; flex: 0 0 auto;
+}
+.rvask .spin { vertical-align: -1px; }
+.pmsg .spin { vertical-align: -1px; }
+/* 数据块载入失败的提示条：可重试，不弹窗打断 */
+.datanote {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(14px + env(safe-area-inset-bottom));
+  z-index: 95; display: flex; align-items: center; gap: 10px;
+  max-width: min(92vw, 560px);
+  background: rgba(17, 24, 39, .93); color: #fff;
+  border-radius: 12px; padding: 10px 12px 10px 14px;
+  font-size: 12.5px; line-height: 1.5;
+  box-shadow: 0 10px 30px rgba(16, 24, 40, .3);
+}
+.datanote button {
+  border: none; border-radius: 8px; padding: 5px 10px; cursor: pointer;
+  font-size: 12px; background: #2563eb; color: #fff; flex: 0 0 auto;
+}
+.datanote button.x { background: rgba(255, 255, 255, .16); padding: 5px 8px; }
+.datanote button:hover { filter: brightness(1.08); }
+

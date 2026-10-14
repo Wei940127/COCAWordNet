@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v34";
+const APP_VERSION = "v35";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -14,13 +14,171 @@ if (!D || !D.words || !D.words.length || window.__DATA_FAIL) {
   if (ld) {
     ld.classList.add("err");
     const lt = document.getElementById("loaderText");
-    if (lt) lt.innerHTML = "词库 data.js 加载失败，应用无法启动。" +
-      "<small>请确认 data.js 与 index.html 在同一文件夹；" +
+    if (lt) lt.innerHTML = "词库加载失败，应用无法启动。" +
+      "<small>请确认数据文件与 index.html 在同一文件夹；" +
       "若是在线访问，请刷新重试或检查网络。</small>";
   }
   return;
 }
 const N = D.words.length;
+
+/* ---------- 数据分块按需载入（v35 首屏瘦身） ----------
+   原来一次性下载 data.js + ex.js（约 3MB gzip），首屏要等全部下完、解析完才能动。
+   现在拆成：
+
+     data_core.js       骨架：词表 / 词层 / 词→下标 / 别名            ← index.html 里同步加载（约 200KB）
+     data_b01..b10.js   下标块 c = 词 [(c-1)*1000, c*1000)：
+                        音标·释义·词族·关系·搭配·词根·例句             ← 需要哪块才载哪块
+     data_extra.js      词表外关联词名（画布上灰节点要用）
+     data_extra_def.js  词表外词的音标+释义（点开灰节点才要）
+
+   合并进的是同一批全局数组，下标仍是全库下标，所以下面所有
+   D.phon[i] / D.trans[i] / D.adj[i] 读法一个字都不用改 ——
+   没载入的槽位是 undefined，读取处本来就善用 `|| ""` 兜底。
+
+   首屏 = 骨架 + 当前块（约 500KB gzip）；其余在首屏画完之后按
+   「离当前块由近到远」的顺序在后台补齐（省流模式下不预取）。 */
+const CHUNK_N = 10;
+const chunkOf = i => Math.floor(i / 1000) + 1;      /* 下标 → 块号 */
+const chunkFile = c => "data_b" + (c < 10 ? "0" + c : c) + ".js";
+const loadedChunk = new Set();
+let hasExtra = false, hasExtraDef = false;
+
+/* 先把各字段占好位（空数组/空对象）：没载入的下标读出来是 undefined，
+   这样所有 D.phon[i] / D.trans[i] 的既有读法都不会抛错。 */
+["phon", "trans", "def", "tag", "fam", "adj"].forEach(f => { if (!D[f]) D[f] = new Array(N); });
+["morph", "cogn", "coll"].forEach(f => { if (!D[f]) D[f] = {}; });
+if (!D.extra) D.extra = [];
+if (!D.extraPhon) D.extraPhon = [];
+if (!D.extraTrans) D.extraTrans = [];
+if (!window.APP_EX) window.APP_EX = {};
+
+/* 载入完成后要顺带刷新的界面（单词列表 / 难词 / 统计 里的释义会补齐） */
+function afterPartLoad() {
+  try {
+    if (typeof renderList === "function" && !$("listModal").classList.contains("hidden")) renderList();
+    if (typeof renderHard === "function" && !$("hardModal").classList.contains("hidden")) renderHard();
+    if (typeof renderStat === "function" && !$("statModal").classList.contains("hidden")) renderStat();
+    if (hasExtraDef && typeof refreshExtInfo === "function") refreshExtInfo();
+    if (typeof fillPanelIfPending === "function") fillPanelIfPending();
+  } catch (e) {}
+}
+
+/* 块脚本调用这两个钩子把自己交进来 */
+window.APP_MERGE = function (c, o) {
+  if (!o || loadedChunk.has(c)) return;
+  const base = (c - 1) * 1000;
+  ["phon", "trans", "def", "tag", "fam", "adj"].forEach(f => {
+    const src = o[f];
+    if (!src) return;
+    const dst = D[f] || (D[f] = new Array(N));
+    for (let k = 0; k < src.length; k++) dst[base + k] = src[k];
+  });
+  ["morph", "cogn", "coll"].forEach(f => {
+    const src = o[f];
+    if (!src) return;
+    const dst = D[f] || (D[f] = {});
+    for (const w in src) dst[w] = src[w];
+  });
+  if (o.ex) {
+    const ex = window.APP_EX || (window.APP_EX = {});
+    for (const w in o.ex) ex[w] = o.ex[w];
+  }
+  loadedChunk.add(c);
+  afterPartLoad();
+};
+window.APP_MERGE_EXTRA = function (o) {
+  D.extra = o.extra;
+  extraMap = null;                 /* 之前可能建过空表，重来 */
+  hasExtra = true;
+  afterPartLoad();
+};
+window.APP_MERGE_EXTRA_DEF = function (o) {
+  D.extraPhon = o.extraPhon;
+  D.extraTrans = o.extraTrans;
+  hasExtraDef = true;
+  afterPartLoad();
+};
+
+/* ---- 脚本注入 ---- */
+const partPending = new Map();
+function loadScript(url) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = url;
+    s.async = true;
+    s.onload = () => resolve(true);
+    s.onerror = () => { s.remove(); reject(new Error(url)); };
+    document.head.appendChild(s);
+  });
+}
+/* 注入脚本并确认「确实合并进来了」——只看 onload 不够：
+   离线时 SW 会回一个 504 空响应、代理也可能塞回一个 200 的错误页，
+   那样脚本等于没加载，必须当成失败去提示重试，而不是静默显示空内容。 */
+function loadPart(file, key, ready) {
+  let p = partPending.get(key);
+  if (!p) {
+    p = loadScript(file).then(() => {
+      if (!ready()) throw new Error("empty:" + file);
+      return true;
+    }).catch(err => { partPending.delete(key); throw err; });
+    partPending.set(key, p);
+  }
+  return p;
+}
+const chunkReady = c => loadedChunk.has(c);
+function needChunk(c) { return chunkReady(c) ? Promise.resolve() : loadPart(chunkFile(c), "c" + c, () => chunkReady(c)); }
+function needExtra() { return hasExtra ? Promise.resolve() : loadPart("data_extra.js", "extra", () => hasExtra); }
+function needExtraDef() { return hasExtraDef ? Promise.resolve() : loadPart("data_extra_def.js", "extrad", () => hasExtraDef); }
+
+/* 载入失败（离线且没缓存）：给一条可重试的提示，不要静默变哑巴 */
+let partFailShown = false;
+function partFailed(target, msg) {
+  if (partFailShown) return;
+  partFailShown = true;
+  const bar = document.createElement("div");
+  bar.className = "datanote";
+  bar.innerHTML = '<span>' + msg + "</span>" +
+    '<button type="button">重试</button><button type="button" class="x">✕</button>';
+  document.body.appendChild(bar);
+  const [retry, close] = bar.querySelectorAll("button");
+  close.onclick = () => { partFailShown = false; bar.remove(); };
+  retry.onclick = () => { partFailShown = false; bar.remove(); target(); };
+}
+
+/* 首屏画完之后，把剩下的块按「离当前块由近到远」补齐。
+   省流模式（saveData）或 2G 网络下不预取：用到哪块才载哪块。 */
+function prefetchRest() {
+  let conn = null;
+  try { conn = navigator.connection || {}; } catch (e) {}
+  if (conn.saveData || /(^|-)2g$/.test(String(conn.effectiveType || ""))) return;
+  needExtra().catch(() => {});        /* 词名表只有 98KB，且第一次展开就要用 */
+  const from = current !== null ? chunkOf(current) : 1;
+  const order = [from];
+  for (let d = 1; d < CHUNK_N; d++) {
+    if (from - d >= 1) order.push(from - d);
+    if (from + d <= CHUNK_N) order.push(from + d);
+  }
+  const step = () => {
+    const c = order.shift();
+    if (c === undefined) { needExtraDef().catch(() => {}); return; }
+    if (chunkReady(c)) return step();
+    needChunk(c).then(step, step);
+  };
+  step();
+}
+
+/* 还有词层没载入时，列表类的界面给一句提示（释义会随载入自动补齐） */
+const partsLoading = () => loadedChunk.size < CHUNK_N;
+const partsHint = () => (partsLoading() ? " · 部分词层释义载入中…" : "");
+
+/* 供自动化测试/排查用：看当前载入了哪些块 */
+window.COCA_DATA = {
+  chunkOf, needChunk, needExtra, needExtraDef,
+  state: () => ({ chunks: Array.from(loadedChunk).sort((a, b) => a - b), extra: hasExtra, extraDef: hasExtraDef }),
+  go: (w) => go(w),
+  expand: (i, o) => expand(i, o)
+};
 
 /* ---------- relation meta ---------- */
 const REL = [
@@ -474,6 +632,15 @@ function assignLevels() {
 
 function expand(i, opts) {
   opts = opts || {};
+  /* 这个下标所属的块（以及词表外词名）还没载入：先取回来再展开。
+     数据块只有几百 KB 且常驻缓存，所以正常情况下这一步是同步的。 */
+  if (!chunkReady(chunkOf(i)) || !hasExtra) {
+    showPartPending(i);
+    Promise.all([needExtra(), needChunk(chunkOf(i))])
+      .then(() => { clearPartPending(); expand(i, opts); })
+      .catch(() => { clearPartPending(); partFailed(() => expand(i, opts), "这个词所在词层的数据没载入成功"); });
+    return;
+  }
   exitPathMode();          /* 正常展开就离开路径模式（链路高亮不再有意义） */
   const me = ensureNode("w", i, 0);
   me.dist = 0;
@@ -554,6 +721,7 @@ let pathState = null;      // { steps, weak }
 let edgeSel = null;        // 连线中点上的关系名
 let extraMap = null;
 function extraIndexOf(word) {
+  if (!D.extra || !D.extra.length) return -1;      /* 词表外词名还没载入 */
   if (!extraMap) { extraMap = new Map(); D.extra.forEach((w, k) => extraMap.set(w, k)); }
   return extraMap.has(word) ? extraMap.get(word) : -1;
 }
@@ -1394,19 +1562,34 @@ function renderExtraPanel(node) {
 }
 
 /* inline card used by the 关系词 list (.ext buttons) so you don't lose the current word */
+let extInfoIdx = -1;
 function showExtInfo(j) {
   const el = $("extInfo");
   if (!el) return;
+  extInfoIdx = j;
   const w = D.extra[j], ph = extraPhon(j), tr = extraTrans(j);
   el.classList.remove("hidden");
   el.innerHTML =
     "<div class='exth'><b>" + w + "</b>" +
-    (ph ? '<span class="phon">/' + ph + "</span>" : '<span class="muted">无音标</span>') +
+    (ph ? '<span class="phon">/' + ph + "</span>" : (hasExtraDef ? '<span class="muted">无音标</span>' : "")) +
     '<button class="mini-say" title="再听一次">🔊 再听一次</button></div>' +
-    "<div class='exttr'>" + (fmtTrans(tr, 0, false) || "（暂无释义）") + "</div>" +
+    (hasExtraDef
+      ? "<div class='exttr'>" + (fmtTrans(tr, 0, false) || "（暂无释义）") + "</div>"
+      : '<div class="partload"><i class="spin"></i>释义正在载入…</div>') +
     "<div class='muted'>词表外关联词 · 不在 10000 词表内，无法展开词网</div>";
   const b = el.querySelector(".mini-say");
   if (b) b.onclick = () => speak(w);
+  if (!hasExtraDef) {
+    needExtraDef().then(() => { if (extInfoIdx === j) refreshExtInfo(); },
+      () => partFailed(() => showExtInfo(j), "词表外词的释义没载入成功"));
+  }
+}
+/* 词表外词那包到位后，把还挂着的占位卡片补成完整内容 */
+function refreshExtInfo() {
+  if (extInfoIdx < 0) return;
+  const el = $("extInfo");
+  if (!el || el.classList.contains("hidden") || !el.querySelector(".partload")) return;
+  showExtInfo(extInfoIdx);
 }
 
 /* ---------- 例句（大模型生成；覆盖全部 10000 词） ---------- */
@@ -1431,9 +1614,46 @@ function exFormsOf(i) {
   return Array.from(set);
 }
 
+/* 数据块还在路上时，面板先亮个「载入中」占位：点了没反应最让人困惑 */
+function showPartPending(i) {
+  if (!panelPending("")) return;
+  $("dWord").textContent = D.words[i];
+  $("dBand").textContent = BAND_NAMES[D.band[i]] + " 词层 · 高频第 " + BAND_RANGE[D.band[i]] + " 词";
+  $("masteryRow").style.display = "";
+}
+function clearPartPending() { /* 展开时本来就会重画面板，占位不用单独收拾 */ }
+
+/* 面板通用占位骨架：返回 false 说明 DOM 还没就绪 */
+function panelPending(bandText) {
+  const d = $("detail"), ph = $("ph");
+  if (!d || !ph) return false;
+  $("emptyState").classList.add("hidden");
+  d.classList.remove("hidden");
+  ph.classList.add("hidden");
+  $("dPhon").textContent = "";
+  $("dBand").textContent = bandText;
+  $("dTags").innerHTML = "";
+  $("dTrans").innerHTML = '<div class="partload"><i class="spin"></i>释义正在载入…</div>';
+  $("dDue").textContent = "";
+  ["bEx", "bDef", "bMorph", "bColl"].forEach(id => { const el = $(id); if (el) el.style.display = "none"; });
+  $("dFam").innerHTML = "";
+  $("dRel").innerHTML = "";
+  $("masteryRow").style.display = "none";
+  return true;
+}
+
 function renderPanel(i, extraNode) {
   if (i === null) {
-    if (extraNode) renderExtraPanel(extraNode);
+    if (!extraNode) return;
+    /* 词表外词的音标/释义是单独一包（约 480KB），点开时才去取 */
+    if (!hasExtraDef) {
+      if (!panelPending("词表外关联词")) return;
+      $("dWord").textContent = D.extra[extraNode.i];
+      needExtraDef().then(() => renderPanel(null, extraNode),
+        () => partFailed(() => renderPanel(null, extraNode), "词表外词的释义没载入成功"));
+      return;
+    }
+    renderExtraPanel(extraNode);
     return;
   }
   extraCurrent = null;
@@ -2241,7 +2461,8 @@ function renderList(resetCap) {
   rows.forEach(i => { const s = statusOf(i); if (s === 2) m++; else if (s === 1) l++; });
   $("listSub").textContent = (b ? BAND_NAMES[b] + " 层" : "全部词层") +
     " · " + rows.length + " 个词" +
-    (listMode === "all" ? "（掌握 " + m + " · 学习中 " + l + " · 未学 " + (rows.length - m - l) + "）" : "");
+    (listMode === "all" ? "（掌握 " + m + " · 学习中 " + l + " · 未学 " + (rows.length - m - l) + "）" : "") +
+    (listQuery.trim() && partsLoading() ? " · 部分释义仍在载入，按释义的搜索可能不全" : partsHint());
 
   const show = rows.slice(0, listCap);
   const clean = s => String(s || "").replace(/\\[rnt]/g, " ").replace(/["<>]/g, "").replace(/\s+/g, " ").trim();
@@ -2353,9 +2574,9 @@ function renderHard() {
   const nF = st.all.filter(r => r.forgot).length;
   const nS = st.all.filter(r => r.stuck).length;
 
-  $("hardSub").textContent = st.rows.length
+  $("hardSub").textContent = (st.rows.length
     ? "共 " + st.rows.length + " 个词 · 忘过 " + nF + " · 卡住 " + nS
-    : (st.all.length ? "没有符合筛选的词" : "还没有难词");
+    : (st.all.length ? "没有符合筛选的词" : "还没有难词")) + partsHint();
 
   const clean = s => String(s || "").replace(/\\[rnt]/g, " ").replace(/["<>]/g, "").replace(/\s+/g, " ").trim();
   const show = st.rows.slice(0, HARD_CAP);
@@ -2530,7 +2751,18 @@ function showCard() {
   const i = rv.queue[rv.idx];
   const total = rv.queue.length;
   rv.revealed = false;
-
+  /* 队列可能跨词层（到期词分散在不同块）：这一块还没到就现取，取回来再画这张卡 */
+  if (!chunkReady(chunkOf(i))) {
+    $("rvSub").textContent = "第 " + (rv.idx + 1) + " / " + total + " 张";
+    $("rvFill").style.width = Math.round(rv.idx / total * 100) + "%";
+    st.className = "rvstage";
+    st.innerHTML = '<div class="rvcard"><div class="rvword">' + esc(D.words[i]) + "</div>" +
+      '<div class="rvask"><i class="spin"></i> 这个词所在词层的释义正在载入…</div></div>';
+    const at = i;
+    needChunk(chunkOf(at)).then(() => { if (rv && rv.queue[rv.idx] === at) showCard(); },
+      () => partFailed(() => showCard(), "词层数据没载入成功"));
+    return;
+  }
   $("rvFill").style.width = Math.round(rv.idx / total * 100) + "%";
   $("rvSub").textContent = "第 " + (rv.idx + 1) + " / " + total + " 张" +
     (rv.rest ? "（本次先做 " + total + " 张，还有 " + rv.rest + " 张到期）" : "") +
@@ -2558,6 +2790,16 @@ function revealCard(i) {
   if (!rv || rv.revealed) return;
   rv.revealed = true;
   const an = $("rvAnswer");
+  /* 释义还在路上（跨词层的队列偶尔会碰上）：先说明一下，载入完自动补上 */
+  if (!chunkReady(chunkOf(i))) {
+    an.className = "rvanswer on";
+    an.innerHTML = '<div class="partload"><i class="spin"></i>释义正在载入…</div>';
+    needChunk(chunkOf(i)).then(() => {
+      if (!rv || !rv.revealed || rv.queue[rv.idx] !== i) return;
+      rv.revealed = false; revealCard(i);
+    }, () => partFailed(() => { rv.revealed = false; revealCard(i); }, "词层数据没载入成功"));
+    return;
+  }
   const tr = fmtTrans(D.trans[i], 10);
   const df = fmtDef(D.def[i], 6);
   an.className = "rvanswer on";
@@ -2725,7 +2967,30 @@ document.addEventListener("keydown", e => {
     modal.classList.remove("hidden");
     setTimeout(() => { (from.value && !to.value ? to : from).focus(); (from.value && !to.value ? to : from).select(); }, 40);
   }
+  /* 路径搜索要在全部 1 万词的关系里找通路，所以先把没载入的块补齐 */
+  function findWaiting() {
+    if (!hasExtra) {                       /* 端点可能是词表外关联词，先保证词名表在 */
+      needExtra().then(find, () => partFailed(find, "词表外词名表没载入成功"));
+      return true;
+    }
+    const todo = [];
+    for (let c = 1; c <= CHUNK_N; c++) if (!chunkReady(c)) todo.push(c);
+    if (!todo.length) return false;
+    msg.className = "pmsg";
+    res.innerHTML = "";
+    let left = todo.length;
+    const total = todo.length;
+    msg.innerHTML = '<i class="spin"></i> 正在载入全部词层的关系数据…（首次使用需要几秒，之后就在缓存里了）';
+    todo.forEach(c => needChunk(c).then(() => {
+      left--;
+      if (left > 0) { msg.innerHTML = '<i class="spin"></i> 正在载入词层数据…（还剩 ' + left + "/" + total + " 块）"; return; }
+      find();
+    }, () => partFailed(find, "词层数据没载入成功，路径查找需要全部 10 块数据")));
+    return true;
+  }
+
   function find() {
+    if (findWaiting()) return;
     const a = resolveWord(from.value), b = resolveWord(to.value);
     msg.className = "pmsg"; res.innerHTML = "";
     if (!a) { msg.textContent = "找不到起点词「" + from.value.trim() + "」"; msg.classList.add("err"); return; }
@@ -3048,14 +3313,44 @@ window.addEventListener("resize", () => {
   paintGrid(); paint();
 });
 
-/* ---------- boot ---------- */
+/* ---------- boot ----------
+   首屏只等「骨架 + 起始词那一块 + 词表外词名」（约 500KB gzip，原来要等 3MB）。
+   全新用户（没有上次的词、也没带 #词）连块都不用等：骨架就够画空状态，
+   剩下 10 块在首屏画完之后按「离当前块由近到远」在后台补齐。 */
 const _loader = document.getElementById("loader");
-if (_loader) _loader.classList.add("done");
-renderStats();
+function hideLoader() { if (_loader) _loader.classList.add("done"); }
+
+/* 起始词：优先 #hash（可分享的深链），其次是上次看的词 */
+let bootSeed = null;
 try {
-  const last = localStorage.getItem("coca10000.last");
-  if (last !== null && D.idx[D.words[+last]] !== undefined) go(+last);
+  if (location.hash.length > 1) {
+    const r = resolveWord(decodeURIComponent(location.hash.slice(1)).trim().toLowerCase());
+    if (r && r.kind === "w") bootSeed = r.i;
+  }
+  if (bootSeed === null) {
+    const last = localStorage.getItem("coca10000.last");
+    if (last !== null && D.idx[D.words[+last]] !== undefined) bootSeed = +last;
+  }
 } catch (e) {}
-if (location.hash.length > 1) applyHash();
+
+function firstScreen() {
+  hideLoader();
+  renderStats();
+  if (bootSeed !== null) go(bootSeed);
+  else if (location.hash.length > 1) applyHash();
+  setTimeout(prefetchRest, 900);      /* 先把首屏让出来，再慢慢补后面的块 */
+}
+
+if (bootSeed === null) {
+  firstScreen();
+} else {
+  Promise.all([needExtra(), needChunk(chunkOf(bootSeed))]).then(firstScreen, () => {
+    /* 起始块没载入成功（离线且没缓存）：先把应用放出来，用户点了会自动重试 */
+    hideLoader();
+    renderStats();
+    setTimeout(prefetchRest, 900);
+    partFailed(() => { if (bootSeed !== null) go(bootSeed); }, "起始词所在词层的数据没载入成功，点重试或直接选别的词");
+  });
+}
 
 })();
