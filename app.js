@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v21";
+const APP_VERSION = "v22";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -1173,16 +1173,16 @@ function fmtTrans(str, cap, fold) {
     /* 这一行一个义项都放不下 → 整行（含词性标签）先藏起来，避免行尾只剩个标签 */
     if (room === 0) {
       rows.push('<div class="trow over">' + chipHTML(t.tag, t.dom) +
-        '<span class="tsen">' + senses.map(s => '<i class="sn">' + esc(s) + "</i>").join('<span class="dot">·</span>') + "</span></div>");
+        '<span class="tsen">' + senses.map(s => '<i class="sn">' + esc(s) + "</i>").join("，") + "</span></div>");
       idx += senses.length;
       return;
     }
     const vis = senses.slice(0, room);
     const ovr = senses.slice(room);
-    let body = vis.map(s => '<i class="sn">' + esc(s) + "</i>").join('<span class="dot">·</span>');
-    /* 超出部分连同它前面的 · 一起包起来，折叠时整段消失，不留孤零零的点 */
-    if (ovr.length) body += '<span class="ovr"><span class="dot">·</span>' +
-      ovr.map(s => '<i class="sn">' + esc(s) + "</i>").join('<span class="dot">·</span>') + "</span>";
+    let body = vis.map(s => '<i class="sn">' + esc(s) + "</i>").join("，");
+    /* 超出部分连同它前面的逗号一起包起来，折叠时整段消失，不留孤零零的标点 */
+    if (ovr.length) body += '<span class="ovr">，' +
+      ovr.map(s => '<i class="sn">' + esc(s) + "</i>").join("，") + "</span>";
     idx += senses.length;
     rows.push('<div class="trow">' + chipHTML(t.tag, t.dom) +
       '<span class="tsen">' + body + "</span></div>");
@@ -1859,8 +1859,8 @@ function revealCard(i) {
   const df = fmtDef(D.def[i], 6);
   an.className = "rvanswer on";
   an.innerHTML =
-    '<div class="rvzh">' + (tr || "<span class='muted'>（暂无中文释义）</span>") + "</div>" +
-    (df ? '<div class="rven"><div class="rvh">英文释义</div>' + df + "</div>" : "");
+    '<div class="rvzh qtrans">' + (tr || "<span class='muted'>（暂无中文释义）</span>") + "</div>" +
+    (df ? '<div class="rven def"><div class="rvh">英文释义</div>' + df + "</div>" : "");
   bindMore(an);
   $("rvShow").style.display = "none";
   const g = $("rvGrades");

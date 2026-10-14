@@ -262,9 +262,12 @@ main { flex: 1; display: flex; min-height: 0; }
   font-style: normal; color: #94a3b8; font-size: 10.5px; font-weight: 700;
   min-width: 13px; text-align: right; padding-top: 2px; flex: 0 0 auto;
 }
-/* 义项折叠：放不下的整行/整组（含词性标签）一起隐藏，部分超出的连 · 一起藏 */
+/* 义项折叠：放不下的整行/整组（含词性标签）一起隐藏，部分超出的连分隔符一起藏。
+   复习卡片里 .expanded 挂在外层 .rvanswer 上，所以两种祖先都要覆盖 */
 .qtrans:not(.expanded) .ovr, .qtrans:not(.expanded) .trow.over,
-.def:not(.expanded) .over, .def:not(.expanded) .dgrp.over { display: none; }
+.def:not(.expanded) .over, .def:not(.expanded) .dgrp.over,
+.rvanswer:not(.expanded) .ovr, .rvanswer:not(.expanded) .trow.over,
+.rvanswer:not(.expanded) .over, .rvanswer:not(.expanded) .dgrp.over { display: none; }
 .morebtn {
   margin: 6px 0 2px 38px; border: 1px dashed var(--border); background: #fff; color: var(--muted);
   border-radius: 6px; padding: 2px 9px; font-size: 11px; cursor: pointer; font-family: inherit;
