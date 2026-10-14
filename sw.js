@@ -9,7 +9,7 @@
    Bump CACHE whenever app files or data.js change, so clients pick up the new version. */
 "use strict";
 
-const CACHE = "cocawn-v31";
+const CACHE = "cocawn-v32";
 
 /* Small app shell — must all fit in the install step. */
 const SHELL = [
@@ -27,7 +27,7 @@ const SHELL = [
 ];
 
 /* The heavy word database — warmed asynchronously, never blocking install.
-   ex.js (3000 条例句, 337 KB) rides along the same off-thread warm-up. */
+   ex.js (10000 条例句, 1.3 MB) rides along the same off-thread warm-up. */
 const WARM = ["./data.js", "./ex.js"];
 
 /* Fetch a URL and store it, reusing the HTTP cache when possible.

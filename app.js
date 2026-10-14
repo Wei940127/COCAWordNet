@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v31";
+const APP_VERSION = "v32";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -1355,7 +1355,7 @@ function showExtInfo(j) {
   if (b) b.onclick = () => speak(w);
 }
 
-/* ---------- 例句（大模型生成；当前覆盖 band 1-3 共 3000 高频词） ---------- */
+/* ---------- 例句（大模型生成；覆盖全部 10000 词） ---------- */
 function escHTML(s) {
   return String(s == null ? "" : s).replace(/[&<>"]/g, c =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -1436,7 +1436,7 @@ function renderPanel(i, extraNode) {
         el.onclick = () => speak(el.dataset.en, el);
       });
     } else {
-      /* 没有例句（band 4-10 的长尾词）时彻底收起，并清掉上一个词残留的 DOM */
+      /* 万一没有例句时彻底收起，并清掉上一个词残留的 DOM */
       bEx.style.display = "none";
       $("dEx").innerHTML = "";
       if ($("dExNote")) $("dExNote").textContent = "";
