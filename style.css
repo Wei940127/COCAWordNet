@@ -123,8 +123,11 @@ main { flex: 1; display: flex; min-height: 0; }
 .legend {
   position: absolute; bottom: 12px; left: 12px; z-index: 10;
   background: rgba(255,255,255,.94); border: 1px solid var(--border);
-  border-radius: 9px; padding: 8px 11px; display: flex; flex-direction: column; gap: 4px;
+  border-radius: 11px; padding: 8px 11px; display: flex; flex-direction: column; gap: 4px;
   font-size: 11.5px; color: var(--muted);
+  width: 244px; max-width: calc(100vw - 24px);   /* 收住宽度，说明文字换行，不被长句撑开 */
+  box-shadow: 0 6px 22px rgba(15,23,42,.10);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
 }
 /* 标题行 + 收起/展开按钮 */
 .legend .lghd {
@@ -145,21 +148,24 @@ main { flex: 1; display: flex; min-height: 0; }
 .legend.mini .lgbd { display: none; }
 .legend .li { display: flex; align-items: center; gap: 7px; }
 .legend .sw { width: 18px; height: 3px; border-radius: 2px; }
-/* 关系类型开关：点关系名只点亮该类连线，其余淡出（可多选） */
+/* 关系类型开关：两列小药丸，点一下只亮该类连线（可多选）；
+   选中时用药丸「自己的关系色」铺底 + 色块发光，颜色和连线一一对应 */
+.legend .lgrs { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; }
 .legend .lgr {
-  cursor: pointer; border-radius: 6px; border: 1px solid transparent;
-  padding: 1.5px 6px; margin: 0 -6px;
-  transition: background .12s, border-color .12s, opacity .12s;
+  display: flex; align-items: center; gap: 6px;
+  padding: 3.5px 8px; border-radius: 8px; cursor: pointer;
+  border: 1px solid transparent; user-select: none;
+  transition: background .12s, border-color .12s, opacity .12s, transform .12s;
 }
-.legend .lgr:hover { background: #f8fafc; }
+.legend .lgr:hover { background: #f1f5f9; transform: translateY(-1px); }
 .legend .lgr:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
-.legend .lgr .lgn { flex: 1 1 auto; }
-.legend .lgr.on {
-  background: #eef2ff; border-color: #c7d2fe; color: #3730a3;
-  font-weight: 700; box-shadow: inset 0 0 0 1px rgba(255,255,255,.6);
+.legend .lgr .lgn { flex: 1 1 auto; white-space: nowrap; }
+.legend .lgr.on { color: #1e293b; font-weight: 700; }
+.legend .lgr.on .sw {
+  height: 4px;
+  box-shadow: 0 0 0 1.5px rgba(255,255,255,.95), 0 0 7px var(--rc);
 }
-.legend .lgr.on .sw { box-shadow: 0 0 0 2px rgba(255,255,255,.9); }
-.legend .lgr.off { opacity: .35; }
+.legend .lgr.off { opacity: .32; }
 .legend .lgr.off .sw { filter: grayscale(.55); }
 .legend .lgfoot {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;

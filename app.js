@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v26";
+const APP_VERSION = "v27";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -1636,14 +1636,18 @@ function renderStats() {
     `<div class="lghd"><span class="lgt">图例</span>` +
     `<button class="lgbtn" id="lgBtn" type="button" title="收起图例">−</button></div>` +
     `<div class="lgbd">` +
+    `<div class="lgrs">` +
     REL.map(r => {
       /* 上位词/下位词在立体视图里是有方向的：↑ 往上、↓ 往下 */
       const arrow = r.t === 2 ? " ↑" : r.t === 3 ? " ↓" : "";
-      return `<div class="li lgr" data-t="${r.t}" role="button" tabindex="0"` +
+      /* --rc 供 CSS 取色（选中发光），选中底色由 JS 按 rgba 上 */
+      return `<div class="lgr" data-t="${r.t}" role="button" tabindex="0"` +
+        ` style="--rc:${r.color}"` +
         ` title="点击：只高亮「${r.name}」这一类（可多选，再点一次取消）">` +
         `<span class="sw" style="background:${r.color}"></span>` +
         `<span class="lgn">${r.name}${arrow}</span></div>`;
     }).join("") +
+    `</div>` +
     `<div class="li" style="margin-top:5px;border-top:1px solid #eef2f7;padding-top:5px">
        <span class="sw" style="background:#16a34a"></span>已掌握
        <span class="sw" style="background:#f59e0b;margin-left:6px"></span>学习中
@@ -1658,7 +1662,7 @@ function renderStats() {
        <div class="bandscale"><span>1k 高频</span><span>← 词频层 →</span><span>10k 低频</span></div>
      </div>
      <div class="li" style="margin-top:5px;border-top:1px solid #eef2f7;padding-top:5px">
-       <span class="sw" style="background:#e2e8f0;border:1px solid #cbd5e1"></span>词表外关联词（点开可看释义·听发音）
+       <span class="sw" style="background:#e2e8f0;border:1px solid #cbd5e1"></span>词表外关联词（点开看释义·发音）
      </div>
      <div class="li" style="color:#94a3b8">↑ 上位词悬浮上方（紫环）· ↓ 下位词沉在下方（青环）· 其余关系同一平面</div>` +
     `<div class="lgfoot">` +
@@ -1687,13 +1691,21 @@ function renderStats() {
   /* ---- 关系类型开关：点关系名只高亮这一类，其余淡出 ---- */
   const hint = el.querySelector("#lgHint");
   const rst = el.querySelector("#lgRst");
+  const rgba = (hex, a) => {
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+  };
   function syncRelUI() {
     const on = relFilter.size > 0;
     el.querySelectorAll(".lgr").forEach(row => {
       const t = +row.dataset.t;
-      row.classList.toggle("on", relFilter.has(t));
-      row.classList.toggle("off", on && !relFilter.has(t));
-      row.setAttribute("aria-pressed", String(relFilter.has(t)));
+      const c = RMAP[t].color, sel = relFilter.has(t);
+      row.classList.toggle("on", sel);
+      row.classList.toggle("off", on && !sel);
+      row.setAttribute("aria-pressed", String(sel));
+      /* 选中时用「这条线自己的颜色」淡淡铺底，而不是统一一个色 */
+      row.style.background = sel ? rgba(c, 0.13) : "";
+      row.style.borderColor = sel ? rgba(c, 0.42) : "";
     });
     rst.classList.toggle("active", on);
     hint.textContent = on
