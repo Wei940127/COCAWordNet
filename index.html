@@ -59,10 +59,11 @@
     <button id="listBtn" class="btn" title="查看当前词层的全部单词（快捷键 L）">☰ 单词列表</button>
     <button id="nextBtn" class="btn primary" title="随机跳到下一个未掌握的词（快捷键 N）">下一个词 ▸</button>
     <button id="reviewBtn" class="btn" title="复习队列（快捷键 R）">🔁 复习</button>
+    <button id="helpBtn" class="btn" title="图例与说明（快捷键 H）" aria-haspopup="dialog" aria-expanded="false">ⓘ 说明</button>
   </div>
 
   <div class="stats" id="stats"></div>
-  <button id="verPill" class="verpill" title="当前版本 · 点一下检查更新">v28</button>
+  <button id="verPill" class="verpill" title="当前版本 · 点一下检查更新">v29</button>
 </header>
 
 <main>
@@ -80,7 +81,7 @@
         <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
       </filter>
     </defs></svg>
-    <div id="legend" class="legend"></div>
+    <div id="legend" class="legend lgbox"></div>
     <!-- 视角：0° = 平面俯视，越大越立体 -->
     <div class="tiltbox">
       <span class="tlabel">视角</span>

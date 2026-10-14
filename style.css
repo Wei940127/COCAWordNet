@@ -120,16 +120,16 @@ main { flex: 1; display: flex; min-height: 0; }
 /* 平面视图：层级光晕没有意义，整体隐藏 */
 #graph g.flatview circle.glow { display: none; }
 
-/* 图例区：两张卡片竖排——「词关系」（可点开关）在上、「说明」在下。
-   容器本身不带底色，卡片间空隙不挡画布点击（pointer-events 穿透） */
+/* 图例区：左下角常驻的「词关系」卡片（可点开关）。
+   静态说明放在顶栏「ⓘ 说明」按钮旁的浮层里，不占学习屏 */
 .legend {
   position: absolute; bottom: 12px; left: 12px; z-index: 10;
   display: flex; flex-direction: column; gap: 8px; align-items: flex-start;
-  font-size: 11.5px; color: var(--muted);
   width: 244px; max-width: calc(100vw - 24px);   /* 收住宽度，说明文字换行，不被长句撑开 */
   pointer-events: none;
 }
-.legend .lgcard {
+.lgbox { font-size: 11.5px; color: var(--muted); }
+.lgbox .lgcard {
   pointer-events: auto; width: 100%;
   background: rgba(255,255,255,.94); border: 1px solid var(--border);
   border-radius: 11px; padding: 8px 11px; display: flex; flex-direction: column; gap: 4px;
@@ -137,64 +137,78 @@ main { flex: 1; display: flex; min-height: 0; }
   -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
 }
 /* 标题行 + 收起/展开按钮 */
-.legend .lghd {
+.lgbox .lghd {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   margin: -1px 0 1px;
 }
-.legend .lgt { font-size: 11px; font-weight: 700; color: #94a3b8; letter-spacing: .5px; }
-.legend .lgbtn {
+.lgbox .lgt { font-size: 11px; font-weight: 700; color: #94a3b8; letter-spacing: .5px; }
+.lgbox .lgbtn {
   border: 1px solid var(--border); background: #fff; color: #64748b;
   width: 19px; height: 19px; line-height: 1; border-radius: 6px; cursor: pointer;
   font-size: 13px; font-family: inherit; padding: 0;
   display: flex; align-items: center; justify-content: center;
 }
-.legend .lgbtn:hover { background: #f1f5f9; color: #334155; border-color: #cbd5e1; }
+.lgbox .lgbtn:hover { background: #f1f5f9; color: #334155; border-color: #cbd5e1; }
 /* 收起状态：只剩标题行的小胶囊 */
-.legend .lgcard.mini { padding: 5px 9px; gap: 0; width: auto; }
-.legend .lgcard.mini .lghd { gap: 8px; margin: 0; }
-.legend .lgcard.mini .lgbd { display: none; }
-.legend .li { display: flex; align-items: center; gap: 7px; }
-.legend .sw { width: 18px; height: 3px; border-radius: 2px; }
+.lgbox .lgcard.mini { padding: 5px 9px; gap: 0; width: auto; }
+.lgbox .lgcard.mini .lghd { gap: 8px; margin: 0; }
+.lgbox .lgcard.mini .lgbd { display: none; }
+.lgbox .li { display: flex; align-items: center; gap: 7px; }
+.lgbox .sw { width: 18px; height: 3px; border-radius: 2px; }
 /* 关系类型开关：两列小药丸，点一下只亮该类连线（可多选）；
    选中时用药丸「自己的关系色」铺底 + 色块发光，颜色和连线一一对应 */
-.legend .lgrs { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; }
-.legend .lgr {
+.lgbox .lgrs { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; }
+.lgbox .lgr {
   display: flex; align-items: center; gap: 6px;
   padding: 3.5px 8px; border-radius: 8px; cursor: pointer;
   border: 1px solid transparent; user-select: none;
   transition: background .12s, border-color .12s, opacity .12s, transform .12s;
 }
-.legend .lgr:hover { background: #f1f5f9; transform: translateY(-1px); }
-.legend .lgr:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
-.legend .lgr .lgn { flex: 1 1 auto; white-space: nowrap; }
-.legend .lgr.on { color: #1e293b; font-weight: 700; }
-.legend .lgr.on .sw {
+.lgbox .lgr:hover { background: #f1f5f9; transform: translateY(-1px); }
+.lgbox .lgr:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
+.lgbox .lgr .lgn { flex: 1 1 auto; white-space: nowrap; }
+.lgbox .lgr.on { color: #1e293b; font-weight: 700; }
+.lgbox .lgr.on .sw {
   height: 4px;
   box-shadow: 0 0 0 1.5px rgba(255,255,255,.95), 0 0 7px var(--rc);
 }
-.legend .lgr.off { opacity: .32; }
-.legend .lgr.off .sw { filter: grayscale(.55); }
-.legend .lgfoot {
+.lgbox .lgr.off { opacity: .32; }
+.lgbox .lgr.off .sw { filter: grayscale(.55); }
+.lgbox .lgfoot {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   margin-top: 5px; padding-top: 5px; border-top: 1px solid #eef2f7;
 }
-.legend .lghint { font-size: 10px; color: #a9b6c6; letter-spacing: .2px; }
-.legend .lgall {
+.lgbox .lghint { font-size: 10px; color: #a9b6c6; letter-spacing: .2px; }
+.lgbox .lgall {
   width: auto; height: 18px; padding: 0 7px; font-size: 10.5px; border-radius: 6px;
 }
-.legend .lgall.active { background: #eef2ff; border-color: #c7d2fe; color: #4338ca; font-weight: 700; }
+.lgbox .lgall.active { background: #eef2ff; border-color: #c7d2fe; color: #4338ca; font-weight: 700; }
 /* 10 阶词频色带：高频 → 低频 */
-.legend .bandblock {
+.lgbox .bandblock {
   margin-top: 5px; padding-top: 6px; border-top: 1px solid #eef2f7;
   display: flex; flex-direction: column; gap: 4px;
   width: 188px; max-width: 100%;
 }
-.legend .bandramp { display: flex; width: 100%; height: 9px; border-radius: 3px; overflow: hidden; }
-.legend .bandramp span { flex: 1 1 0; }
-.legend .bandscale {
+.lgbox .bandramp { display: flex; width: 100%; height: 9px; border-radius: 3px; overflow: hidden; }
+.lgbox .bandramp span { flex: 1 1 0; }
+.lgbox .bandscale {
   display: flex; justify-content: space-between; gap: 6px;
   font-size: 10px; color: #94a3b8; letter-spacing: .2px;
 }
+
+/* 说明浮层：贴在顶栏「ⓘ 说明」按钮旁边，看完点别处即收起 */
+.helppop {
+  position: fixed; z-index: 96;
+  width: 244px; max-width: calc(100vw - 16px);
+  background: rgba(255,255,255,.98); border: 1px solid var(--border);
+  border-radius: 11px; padding: 8px 11px; display: flex; flex-direction: column; gap: 4px;
+  box-shadow: 0 12px 34px rgba(15,23,42,.16);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+}
+.helppop { animation: hpop .14s ease-out; }
+@keyframes hpop { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+/* 按钮处于打开状态 */
+#helpBtn.on { background: #eef2ff; border-color: #c7d2fe; color: #4338ca; }
 
 /* 视角控制：右下角浮动，0° = 平面，越大越立体 */
 .tiltbox {
@@ -630,8 +644,9 @@ main { flex: 1; display: flex; min-height: 0; }
   .btn, select { min-height: 38px; }
   .graphtools .hint { display: none; }
   .graphtools { top: max(8px, env(safe-area-inset-top)); }
-  .legend { font-size: 10.5px; max-width: 62vw; }
-  .legend .lgcard { padding: 7px 9px; }
+  .legend { max-width: 62vw; }
+  .lgbox { font-size: 10.5px; }
+  .lgbox .lgcard { padding: 7px 9px; }
   .dhead h1 { font-size: 26px; }
   .stats { font-size: 11px; }
   /* 窄屏：视角条压缩，滑块短一些，避免和图例挤在一起 */

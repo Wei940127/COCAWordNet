@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v28";
+const APP_VERSION = "v29";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -1628,9 +1628,10 @@ function renderStats() {
   updateRvBadge();
 }
 
-/* ---------- legend：两张卡片 ----------
-   「词关系」= 可点的 7 类关系开关；「说明」= 掌握度/词频层/词表外词等静态说明。
-   分开放才不互相干扰：关系卡片常驻可点，说明卡片看完就能收起。 */
+/* ---------- legend：词关系卡片 ----------
+   只留「可点的 7 类关系开关」，常驻左下角；
+   静态说明（掌握度 / 词频层 / 词表外词 / 悬浮方向）挪到顶栏「ⓘ 说明」按钮旁，
+   这样主学习屏只保留要操作的东西。 */
 (function legend() {
   const wrap = $("legend");
 
@@ -1652,26 +1653,7 @@ function renderStats() {
       `<button class="lgbtn lgall" id="lgRst" type="button" title="恢复显示全部关系（快捷键 0）">全部</button>` +
     `</div>`;
 
-  const helpBody =
-    `<div class="li">
-       <span class="sw" style="background:#16a34a"></span>已掌握
-       <span class="sw" style="background:#f59e0b;margin-left:6px"></span>学习中
-       <span class="sw" style="background:#cbd5e1;margin-left:6px"></span>未学
-     </div>
-     <div class="bandblock">
-       <div class="bandramp">
-         ${Array.from({ length: 10 }, (_, k) =>
-           `<span style="background:${BAND_COLORS[k + 1]}" title="${BAND_NAMES[k + 1]} 词层（第 ${BAND_RANGE[k + 1]} 词）"></span>`
-         ).join("")}
-       </div>
-       <div class="bandscale"><span>1k 高频</span><span>← 词频层 →</span><span>10k 低频</span></div>
-     </div>
-     <div class="li" style="margin-top:4px;border-top:1px solid #eef2f7;padding-top:5px">
-       <span class="sw" style="background:#e2e8f0;border:1px solid #cbd5e1"></span>词表外关联词（点开看释义·发音）
-     </div>
-     <div class="li" style="color:#94a3b8">↑ 上位词悬浮上方（紫环）· ↓ 下位词沉在下方（青环）· 其余关系同一平面</div>`;
-
-  /* 造一张可收起的卡片；mini 状态各自记在 localStorage */
+  /* 造一张可收起的卡片；mini 状态记在 localStorage */
   function mkCard(title, bodyHTML, key) {
     const card = document.createElement("div");
     card.className = "lgcard";
@@ -1699,7 +1681,6 @@ function renderStats() {
     return card;
   }
   const relCard = mkCard("词关系", relBody, "cocawn.legend.mini");
-  mkCard("说明", helpBody, "cocawn.help.mini");
 
   /* ---- 关系类型开关：点关系名只高亮这一类，其余淡出 ---- */
   const hint = relCard.querySelector("#lgHint");
@@ -1746,6 +1727,72 @@ function renderStats() {
     clearRelFilter();
   });
   syncRelUI();
+})();
+
+/* ---------- 说明浮层：挂在顶栏「ⓘ 说明」按钮旁边 ----------
+   纯参考信息（不是操作），所以做成按钮旁的浮层：看完点一下就走，
+   主学习屏只留词网 + 关系开关。 */
+(function helpPop() {
+  const btn = $("helpBtn");
+  if (!btn) return;
+  const pop = document.createElement("div");
+  pop.className = "helppop lgbox hidden";
+  pop.setAttribute("role", "dialog");
+  pop.setAttribute("aria-label", "图例与说明");
+  pop.innerHTML =
+    `<div class="lghd"><span class="lgt">说明</span>` +
+    `<button class="lgbtn lgx" type="button" title="关闭（Esc）">✕</button></div>` +
+    `<div class="lgbd">` +
+    `<div class="li">
+       <span class="sw" style="background:#16a34a"></span>已掌握
+       <span class="sw" style="background:#f59e0b;margin-left:6px"></span>学习中
+       <span class="sw" style="background:#cbd5e1;margin-left:6px"></span>未学
+     </div>
+     <div class="bandblock">
+       <div class="bandramp">
+         ${Array.from({ length: 10 }, (_, k) =>
+           `<span style="background:${BAND_COLORS[k + 1]}" title="${BAND_NAMES[k + 1]} 词层（第 ${BAND_RANGE[k + 1]} 词）"></span>`
+         ).join("")}
+       </div>
+       <div class="bandscale"><span>1k 高频</span><span>← 词频层 →</span><span>10k 低频</span></div>
+     </div>
+     <div class="li" style="margin-top:4px;border-top:1px solid #eef2f7;padding-top:5px">
+       <span class="sw" style="background:#e2e8f0;border:1px solid #cbd5e1"></span>词表外关联词（点开看释义·发音）
+     </div>
+     <div class="li" style="color:#94a3b8">↑ 上位词悬浮上方（紫环）· ↓ 下位词沉在下方（青环）· 其余关系同一平面</div>` +
+    `</div>`;
+  document.body.appendChild(pop);
+
+  /* 贴着按钮放；右边/下边放不下就翻转 */
+  function place() {
+    const r = btn.getBoundingClientRect();
+    const w = pop.offsetWidth || 244, h = pop.offsetHeight || 180;
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
+    let top = r.bottom + 8;
+    if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 8);
+    pop.style.left = left + "px";
+    pop.style.top = top + "px";
+  }
+  let open = false;
+  function show(v) {
+    open = v;
+    pop.classList.toggle("hidden", !v);
+    btn.classList.toggle("on", v);
+    btn.setAttribute("aria-expanded", String(v));
+    if (v) place();
+  }
+  window.toggleHelp = () => show(!open);
+  window.closeHelp = () => show(false);
+  btn.addEventListener("click", ev => { ev.stopPropagation(); show(!open); });
+  pop.querySelector(".lgx").addEventListener("click", ev => { ev.stopPropagation(); show(false); });
+  /* 点到别处就收起（点按钮本身由上面的 handler 管，不重复处理） */
+  document.addEventListener("click", ev => {
+    if (!open) return;
+    if (pop.contains(ev.target) || btn.contains(ev.target)) return;
+    show(false);
+  });
+  window.addEventListener("resize", () => { if (open) place(); });
+  window.addEventListener("scroll", () => { if (open) show(false); }, true);
 })();
 
 /* ---------- progress map ---------- */
@@ -2485,6 +2532,9 @@ document.addEventListener("keydown", e => {
   /* 关系类型开关：1–7 依次对应图例里的七种关系，0 = 全部显示 */
   if (/^[1-7]$/.test(e.key)) { toggleRelType(+e.key - 1); e.preventDefault(); }
   if (e.key === "0") { clearRelFilter(); e.preventDefault(); }
+  /* 说明浮层：H 开关、Esc 关闭 */
+  if (e.key === "h" || e.key === "H") { if (window.toggleHelp) window.toggleHelp(); }
+  if (e.key === "Escape" && window.closeHelp) window.closeHelp();
 });
 
 window.addEventListener("resize", () => {
