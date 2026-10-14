@@ -63,7 +63,7 @@
   </div>
 
   <div class="stats" id="stats"></div>
-  <button id="verPill" class="verpill" title="当前版本 · 点一下检查更新">v30</button>
+  <button id="verPill" class="verpill" title="当前版本 · 点一下检查更新">v31</button>
 </header>
 
 <main>
@@ -141,6 +141,12 @@
       </div>
       <!-- 间隔重复：这个词什么时候该再复习一次 -->
       <div id="dDue" class="ddue"></div>
+
+      <!-- 例句：语境句（英文 + 中文），点击整句朗读 -->
+      <div class="block" id="bEx" style="display:none">
+        <h3>例句 <small id="dExNote"></small></h3>
+        <div id="dEx" class="exlist"></div>
+      </div>
 
       <div class="block" id="bDef" style="display:none">
         <h3>英文释义</h3>
@@ -310,6 +316,7 @@
 
 <script src="d3.min.js"></script>
 <script src="data.js" onerror="window.__DATA_FAIL=1"></script>
+<script src="ex.js" onerror="window.__EX_FAIL=1"></script>
 <script src="app.js"></script>
 <script>
 /* PWA：离线缓存 + 自动更新（用 file:// 直接打开时跳过）

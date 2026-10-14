@@ -360,6 +360,20 @@ main { flex: 1; display: flex; min-height: 0; }
 .block h3 small { text-transform: none; letter-spacing: 0; font-weight: 400; }
 .trans { white-space: pre-line; line-height: 1.7; font-size: 13.5px; }
 .def { color: var(--muted); line-height: 1.65; font-size: 12.5px; margin-top: 8px; }
+
+/* 例句：一条语境句（英文 + 中文），整块可点朗读 */
+.exlist { display: flex; flex-direction: column; gap: 8px; }
+.exlist .exrow {
+  border-left: 2px solid var(--accent);
+  background: #f8fafc; border-radius: 0 8px 8px 0;
+  padding: 8px 11px 8px 10px; cursor: pointer;
+  transition: background .12s, border-color .12s;
+}
+.exlist .exrow:hover { background: #eef2ff; }
+.exlist .exrow:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
+.exlist .exen { margin: 0; font-size: 13.5px; line-height: 1.6; color: #1e293b; }
+.exlist .exen b { color: var(--accent); font-weight: 600; background: var(--accent-soft); border-radius: 3px; padding: 0 3px; }
+.exlist .exzh { margin: 4px 0 0; font-size: 12.5px; line-height: 1.55; color: var(--muted); }
 .fam { display: flex; flex-wrap: wrap; gap: 6px; }
 .fam span {
   background: #f8fafc; border: 1px solid var(--border); border-radius: 6px;

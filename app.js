@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v30";
+const APP_VERSION = "v31";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -1355,6 +1355,28 @@ function showExtInfo(j) {
   if (b) b.onclick = () => speak(w);
 }
 
+/* ---------- 例句（大模型生成；当前覆盖 band 1-3 共 3000 高频词） ---------- */
+function escHTML(s) {
+  return String(s == null ? "" : s).replace(/[&<>"]/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+/* 句中目标词高亮：用词族全部词形匹配，长词优先，避免 act 命进 actor 中间 */
+function exHighlight(en, forms) {
+  const safe = escHTML(en);
+  const list = (forms || []).filter(Boolean)
+    .map(f => String(f).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .sort((a, b) => b.length - a.length);
+  if (!list.length) return safe;
+  try {
+    return safe.replace(new RegExp("\\b(" + list.join("|") + ")\\b", "gi"), "<b>$1</b>");
+  } catch (e) { return safe; }
+}
+function exFormsOf(i) {
+  const set = new Set([D.words[i]]);
+  (D.fam[i] || []).forEach(p => set.add(String(p[0])));
+  return Array.from(set);
+}
+
 function renderPanel(i, extraNode) {
   if (i === null) {
     if (extraNode) renderExtraPanel(extraNode);
@@ -1393,6 +1415,31 @@ function renderPanel(i, extraNode) {
       ddue.innerHTML = (overdue ? "🔔 复习已到期" : "⏱ 下次复习 " + dueText(i)) +
         '<span class="ddim">已复习 ' + (rec.reps || 0) + " 次" +
         (rec.laps ? " · 忘过 " + rec.laps + " 次" : "") + "</span>";
+    }
+  }
+
+  /* 例句：语境句 + 中文，点整句朗读 */
+  const exWord = D.words[i];
+  const exRec = (window.APP_EX && window.APP_EX[exWord]) || null;
+  const bEx = $("bEx");
+  if (bEx) {
+    if (exRec && exRec[0]) {
+      bEx.style.display = "";
+      const note = $("dExNote");
+      if (note) note.textContent = "点击整句朗读";
+      $("dEx").innerHTML =
+        '<div class="exrow" data-en="' + escHTML(exRec[0]) + '" role="button" tabindex="0">' +
+        '<p class="exen">' + exHighlight(exRec[0], exFormsOf(i)) + "</p>" +
+        '<p class="exzh">' + escHTML(exRec[1] || "") + "</p>" +
+        "</div>";
+      $("dEx").querySelectorAll(".exrow").forEach(el => {
+        el.onclick = () => speak(el.dataset.en, el);
+      });
+    } else {
+      /* 没有例句（band 4-10 的长尾词）时彻底收起，并清掉上一个词残留的 DOM */
+      bEx.style.display = "none";
+      $("dEx").innerHTML = "";
+      if ($("dExNote")) $("dExNote").textContent = "";
     }
   }
 
