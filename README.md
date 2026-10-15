@@ -16,7 +16,7 @@
 - **词典信息**：每个词带音标、中文释义、英文释义、考纲标签（四六级/考研/托福/雅思/GRE）
 - **美式发音**：真人美音（有道词典接口），离线自动回退浏览器语音合成；快捷键 P
 - **词根词缀拆解**：1,369 个词有构词分析（前缀/词根/后缀分段染色 + 中文释义），如 impossible = im-(不) + poss(能够) + ible(可…的)；并给出同根词网（vision → television, advise, supervise…）
-- **高频搭配**：6,718 个词有从 1,700 万词维基语料统计的真实搭配，如 make → make sure / make up，点击即发音
+- **高频搭配**：9,937 个词（99.4%）有真实语料搭配，如 make → make sure / make up、abject → abject poverty / abject submission，点击即发音。高频词来自 1,700 万词维基语料的 PMI 统计；低频词（6k–10k 层）维基样本里几乎没有证据，改用 Google Books n-gram 补齐
 - **掌握度三态**：未学 / 学习中 / 已掌握，节点变色 + 顶部进度条，localStorage 自动保存
 - **进度地图**：按 1k–10k 词频层的进度热力图，自动标出短板层，点击直接开刷
 - **易混词辨析**：用词表 + 音标自动算出「形近」「音近」的词（effect/affect、than/then、principal/principle、desert/dessert、loose/lose…），词卡里直接列出；点「辨析」并排对比音标与释义，还能做「选词填空」小测（快捷键 C）
@@ -153,7 +153,7 @@ CWN1.hs18b.3.22-2-0.7-1-0.1h4-1-0
 | 同义词/反义词/上下位词 | [WordNet](https://wordnet.princeton.edu/) (Princeton University)                                                                                                            |
 | 语义相关词        | [GloVe](https://nlp.stanford.edu/projects/glove/) 6B 50d 词向量 (Stanford NLP)                                                                                                 |
 | 释义/音标/中文翻译   | [ECDICT](https://github.com/skywind3000/ECDICT) 开源英汉词典                                                                                                                      |
-| 搭配语料         | [text8](http://mattmahoney.net/dc/textdata.html) (Wikipedia corpus)                                                                                                         |
+| 搭配语料         | [text8](http://mattmahoney.net/dc/textdata.html) (Wikipedia corpus) + Google Books n-gram（经 [Datamuse](https://www.datamuse.com/api/) 接口，构建期抓取烘焙进静态数据，运行时零依赖）                                                              |
 | 美式真人发音       | 有道词典在线接口（离线回退 Web Speech API）                                                                                                                                               |
 | 图形渲染         | [D3.js](https://d3js.org/) v7（已本地化，无 CDN 依赖）                                                                                                                                |
 
