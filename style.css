@@ -49,6 +49,9 @@ body {
 .sugg b { font-weight: 600; }
 .sugg i { color: var(--muted); font-style: normal; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sugg .sugband { margin-left: auto; font-size: 11px; color: #94a3b8; }
+/* 中文搜索：词典载入中 / 无结果 的提示行（不可点） */
+.sugg .sugload { cursor: default; color: var(--muted); font-size: 12.5px; }
+.sugg .sugload:hover { background: transparent; }
 
 .controls { display: flex; gap: 8px; align-items: center; }
 select {

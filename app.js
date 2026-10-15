@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v38";
+const APP_VERSION = "v39";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -43,6 +43,8 @@ const chunkOf = i => Math.floor(i / 1000) + 1;      /* 下标 → 块号 */
 const chunkFile = c => "data_b" + (c < 10 ? "0" + c : c) + ".js";
 const loadedChunk = new Set();
 let hasExtra = false, hasExtraDef = false;
+let hasZh = false;                  /* 中文释义索引（data_zh.js，214KB gzip，按需载入） */
+let zhParts = null;                 /* 切分后的中文索引（N 段，与 D.words 同下标） */
 
 /* 先把各字段占好位（空数组/空对象）：没载入的下标读出来是 undefined，
    这样所有 D.phon[i] / D.trans[i] 的既有读法都不会抛错。 */
@@ -105,6 +107,13 @@ window.APP_MERGE_EXTRA_DEF = function (o) {
   hasExtraDef = true;
   afterPartLoad();
 };
+/* 中文释义索引：一条大字符串，词与词之间用 ";" 分隔（生成脚本已保证正文里不含 ";"） */
+window.APP_MERGE_ZH = function (o) {
+  D.zh = o && o.zh ? o.zh : "";
+  zhParts = null;                   /* 惰性切分：第一次用中文搜索时才 split */
+  hasZh = true;
+  afterPartLoad();
+};
 
 /* ---- 脚本注入 ---- */
 const partPending = new Map();
@@ -136,6 +145,8 @@ const chunkReady = c => loadedChunk.has(c);
 function needChunk(c) { return chunkReady(c) ? Promise.resolve() : loadPart(chunkFile(c), "c" + c, () => chunkReady(c)); }
 function needExtra() { return hasExtra ? Promise.resolve() : loadPart("data_extra.js", "extra", () => hasExtra); }
 function needExtraDef() { return hasExtraDef ? Promise.resolve() : loadPart("data_extra_def.js", "extrad", () => hasExtraDef); }
+/* 中文搜索索引：只有用户第一次输入中文时才下载，首屏零成本 */
+function needZh() { return hasZh ? Promise.resolve() : loadPart("data_zh.js", "zh", () => hasZh); }
 
 /* 载入失败（离线且没缓存）：给一条可重试的提示，不要静默变哑巴 */
 let partFailShown = false;
@@ -180,10 +191,11 @@ const partsHint = () => (partsLoading() ? " · 部分词层释义载入中…" :
 
 /* 供自动化测试/排查用：看当前载入了哪些块 */
 window.COCA_DATA = {
-  chunkOf, needChunk, needExtra, needExtraDef,
-  state: () => ({ chunks: Array.from(loadedChunk).sort((a, b) => a - b), extra: hasExtra, extraDef: hasExtraDef }),
+  chunkOf, needChunk, needExtra, needExtraDef, needZh,
+  state: () => ({ chunks: Array.from(loadedChunk).sort((a, b) => a - b), extra: hasExtra, extraDef: hasExtraDef, zh: hasZh }),
   go: (w) => go(w),
   expand: (i, o) => expand(i, o),
+  zh: { has: () => hasZh, search: (q, cap) => zhSearch(zhNorm(q).split(/\s+/).filter(Boolean), cap).map(i => D.words[i]), hit: (w, q) => { const i = D.idx[String(w).toLowerCase()]; return i === undefined ? null : zhHitOf(i, [zhNorm(q)]); } },
   zoom: () => zoomBeh,          /* 供测试构造/复位视口变换 */
   resetView: () => resetView()
 };
@@ -2271,9 +2283,48 @@ const sugg = $("sugg");
 const search = $("search");
 let sugItems = [], sugSel = -1;
 
+/* 中文搜索：汉字 → 命中该义的词。索引 data_zh.js 按需载入（214KB gzip），
+   首屏不下载；只有第一次输入中文时才拉取。
+   索引里「词间」用 ";"、「词内义项间」用 "|"（两个分隔符必须不同，
+   否则 split("|") 出来的是义项总数而不是词数）。 */
+const CJK_RE = /[\u4e00-\u9fa5]/;
+const ZH_WSEP = ";", ZH_SEP = "|";
+/* 与生成脚本 slim() 保持一致：只留汉字/字母/数字 */
+const zhNorm = s => String(s || "").replace(/[^\u4e00-\u9fa5A-Za-z0-9]/g, "");
+function zhArray() {
+  if (zhParts === null && D.zh) {
+    const a = D.zh.split(ZH_WSEP);
+    zhParts = a.length === N ? a : null;      /* 结构对不上就当没载入，不至于错位 */
+  }
+  return zhParts;
+}
+/* 命中该词的哪个义项（拿来做候选行的说明） */
+function zhHitOf(i, toks) {
+  const arr = zhArray();
+  const s = arr ? arr[i] || "" : "";
+  const sl = s.split(ZH_SEP).find(x => toks.every(t => x.indexOf(t) >= 0)) || s;
+  return sl.slice(0, 24);
+}
+function zhSearch(toks, cap) {
+  const arr = zhArray();
+  if (!arr) return [];
+  const out = [];
+  for (let i = 0; i < N; i++) {
+    const s = arr[i];
+    if (!s) continue;
+    let okAll = true;
+    for (let k = 0; k < toks.length; k++) if (s.indexOf(toks[k]) < 0) { okAll = false; break; }
+    if (okAll) out.push(i);
+  }
+  out.sort((a, b) => D.band[a] - D.band[b]);   /* 高频词层优先 */
+  return out.slice(0, cap || 12);
+}
+
 function doSuggest(q) {
-  q = q.trim().toLowerCase();
-  if (!q) { sugg.classList.add("hidden"); return; }
+  const raw = String(q || "").trim();
+  if (!raw) { sugg.classList.add("hidden"); return; }
+  if (CJK_RE.test(raw)) { zhSuggest(raw); return; }
+  q = raw.toLowerCase();
   const res = [];
   const seen = new Set();
   for (let i = 0; i < N && res.length < 8; i++) {
@@ -2297,6 +2348,38 @@ function doSuggest(q) {
   if (!sugItems.length) { sugg.classList.add("hidden"); return; }
   sugg.innerHTML = sugItems.map(([w, i, note], k) =>
     `<div data-k="${k}"><b>${w}</b><i>${note || (D.trans[i] || "").split("；")[0].slice(0, 30)}</i><span class="sugband" style="color:${bandColor(D.band[i])}">${BAND_NAMES[D.band[i]]}</span></div>`
+  ).join("");
+  sugg.classList.remove("hidden");
+  sugg.querySelectorAll("div").forEach(d => {
+    d.onclick = () => pick(sugItems[+d.dataset.k]);
+  });
+}
+
+/* 中文路径：索引没载入就先拉，载完后自动用「当时输入框里的内容」重跑一次 */
+function zhSuggest(raw) {
+  const toks = raw.split(/\s+/).map(zhNorm).filter(Boolean);
+  if (!toks.length) { sugg.classList.add("hidden"); return; }
+  if (!hasZh) {
+    sugg.innerHTML = '<div class="sugload">正在载入中文词典…</div>';
+    sugg.classList.remove("hidden");
+    needZh().then(() => {
+      const now = String(search.value || "").trim();
+      if (now && CJK_RE.test(now)) zhSuggest(now);
+    }).catch(() => {
+      sugg.innerHTML = '<div class="sugload">中文词典没能载入（可点顶栏徽标强制更新后重试）</div>';
+    });
+    return;
+  }
+  const hits = zhSearch(toks, 12);
+  sugItems = hits.map(i => [D.words[i], i, zhHitOf(i, toks)]);
+  sugSel = -1;
+  if (!sugItems.length) {
+    sugg.innerHTML = '<div class="sugload">没有匹配「' + escHTML(raw) + '」的词</div>';
+    sugg.classList.remove("hidden");
+    return;
+  }
+  sugg.innerHTML = sugItems.map(([w, i, note], k) =>
+    `<div data-k="${k}"><b>${w}</b><i>${note}</i><span class="sugband" style="color:${bandColor(D.band[i])}">${BAND_NAMES[D.band[i]]}</span></div>`
   ).join("");
   sugg.classList.remove("hidden");
   sugg.querySelectorAll("div").forEach(d => {
@@ -2502,7 +2585,7 @@ function renderStats() {
     /* 怎么用：把原来学习屏上方那行小字搬进来，并补成一份简短使用说明 */
     `<div class="hsec">怎么用</div>` +
     `<div class="hlist">
-       <div><i>1</i>点任意节点：朗读美式发音，右侧看音标与释义</div>
+       <div><i>1</i>顶栏搜索支持打中文找词（如「政府」「放弃」）；点任意节点朗读美音、右侧看音标与释义</div>
        <div><i>2</i>点相邻节点继续向外扩，像滚雪球一样把相关词连成一片</div>
        <div><i>3</i>线太密看不清：点左下「词关系」里的关系名，只看这一类</div>
        <div><i>4</i>滚轮缩放、拖拽平移；双击节点重新展开它；按 Z（或点右下角 ⤾）把视图复位</div>
