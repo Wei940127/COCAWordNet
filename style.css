@@ -675,9 +675,11 @@ main { flex: 1; display: flex; min-height: 0; }
   display: flex; flex-direction: column; gap: 6px;
   border-top: 1px solid #eef2f7; padding-top: 12px;
 }
-.rgroup { background: #fff; border: 1px solid #eef2f7; border-left: 3px solid #a7f3d0; border-radius: 9px; }
-.rgroup.open { background: #fbfefc; }
-.rgroup.focus { outline: 2px solid #1d4ed8; outline-offset: 1px; }
+/* 注意：.rgroup 与词卡「关系词」区块的 .rel .rgroup 撞名（那个类从 v1 就存在），
+   必须圈定在 #rootModal 里，否则绿色左边框会漏到关系词分组上 */
+#rootModal .rgroup { background: #fff; border: 1px solid #eef2f7; border-left: 3px solid #a7f3d0; border-radius: 9px; }
+#rootModal .rgroup.open { background: #fbfefc; }
+#rootModal .rgroup.focus { outline: 2px solid #1d4ed8; outline-offset: 1px; }
 .rhead { display: flex; align-items: center; gap: 10px; padding: 8px 11px; cursor: pointer; border-radius: 8px; }
 .rhead:hover { background: #f8fafc; }
 .rhead .morph { gap: 0; }
