@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v39";
+const APP_VERSION = "v40";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -60,6 +60,10 @@ let confVer = 0;
 const confMemo = new Map();
 function confInvalidate() { confVer++; confMemo.clear(); }
 
+/* 词根索引：同样是「随分块作废重算」的派生数据 —— D.morph 只覆盖已载入的词层，
+   没载入的块进来之后必须重建，否则页面会永远停在半份清单上。 */
+let rootIdx = null;
+
 /* 载入完成后要顺带刷新的界面（单词列表 / 难词 / 统计 里的释义会补齐） */
 function afterPartLoad() {
   try {
@@ -68,6 +72,7 @@ function afterPartLoad() {
     if (typeof renderStat === "function" && !$("statModal").classList.contains("hidden")) renderStat();
     if (hasExtraDef && typeof refreshExtInfo === "function") refreshExtInfo();
     if (typeof fillPanelIfPending === "function") fillPanelIfPending();
+    if (typeof renderRoot === "function" && !$("rootModal").classList.contains("hidden")) renderRoot();
   } catch (e) {}
 }
 
@@ -93,6 +98,7 @@ window.APP_MERGE = function (c, o) {
   }
   loadedChunk.add(c);
   confInvalidate();
+  rootIdx = null;                  /* 词根索引只统计已载入的词，新块进来必须重建 */
   afterPartLoad();
 };
 window.APP_MERGE_EXTRA = function (o) {
@@ -2176,18 +2182,37 @@ function renderPanel(i, extraNode) {
   const mw = D.morph && D.morph[w];
   const cg = D.cogn && D.cogn[w];
   $("bMorph").style.display = (mw || cg) ? "" : "none";
+  /* 每个词根段都是入口：点一下看「所有含这个词根的词」（-spect- → expect/inspect/respect…） */
   $("dMorph").innerHTML = mw ? mw.map(function (seg) {
     const k = seg[0], t = seg[1], g = seg[2] || "";
-    return '<span class="seg ' + k + '">' + t + (g ? "<i>" + g + "</i>" : "") + "</span>";
+    return '<button type="button" class="seg ' + k + '" data-k="' + esc(k) + '" data-t="' + esc(t) +
+      '" title="看所有含「' + esc(t) + '」的词">' + esc(t) +
+      (g ? "<i>" + esc(g) + "</i>" : "") + "</button>";
   }).join('<span class="plus">+</span>') : "";
+  $("dMorph").querySelectorAll("button.seg").forEach(b => {
+    b.onclick = () => openRoot(b.dataset.k, b.dataset.t);
+  });
+  const mn = $("dMorphNote");
+  mn.textContent = "";
+  if (mw) {
+    const all = document.createElement("button");
+    all.type = "button";
+    all.id = "dMorphAll";
+    all.className = "mlink";
+    all.textContent = "全部词根 ›";
+    all.title = "词根 / 词缀索引（快捷键 I）";
+    all.onclick = () => openRoot();
+    mn.appendChild(all);
+    if (cg && cg.length) mn.appendChild(document.createTextNode(" · 同根词 " + cg.length + " 个"));
+  } else if (cg && cg.length) {
+    mn.textContent = "同根词 " + cg.length + " 个";
+  }
   if (cg && cg.length) {
-    $("dMorphNote").textContent = "· 同根词 " + cg.length + " 个";
     $("dCogn").innerHTML = cg.map(c => "<button data-w=\"" + c + "\">" + c + "</button>").join("");
     $("dCogn").querySelectorAll("button").forEach(b => {
       b.onclick = () => { trail.push(current); expand(D.idx[b.dataset.w]); speak(b.dataset.w); };
     });
   } else {
-    $("dMorphNote").textContent = "";
     $("dCogn").innerHTML = "";
   }
 
@@ -2593,6 +2618,7 @@ function renderStats() {
        <div><i>6</i>多义词用释义上方的词性标签一键切换：只看名词 / 动词 / 形容词的义项</div>
        <div><i>7</i>顶栏「📊 统计」看每天的复习量、记忆保持率和下次复习排期</div>
        <div><i>8</i>词卡里的「易混词」列出形近 / 音近的词，点「辨析」并排对比、还能做小测（快捷键 C）</div>
+       <div><i>9</i>词卡里的「词根拆解」每一段都能点：一个词根串起一串同根词（-spect- → expect / inspect / respect），这是把散词连成串最快的一条路（快捷键 I）</div>
      </div>` +
     `<div class="hsec">图例</div>` +
     `<div class="li">
@@ -2617,7 +2643,8 @@ function renderStats() {
        <span><b>R</b>复习</span><span><b>N</b>下一个词</span><span><b>G</b>路径查找</span>
        <span><b>M</b>进度地图</span><span><b>L</b>单词列表</span><span><b>V</b>立体/平面</span>
        <span><b>P</b>发音</span><span><b>H</b>本说明</span><span><b>K</b>难词清单</span>
-       <span><b>S</b>学习统计</span><span><b>C</b>易混词辨析</span><span><b>Z</b>复位视图</span><span><b>1–7</b>关系过滤</span><span><b>0</b>全部显示</span>
+       <span><b>S</b>学习统计</span><span><b>C</b>易混词辨析</span><span><b>I</b>词根索引</span>
+       <span><b>Z</b>复位视图</span><span><b>1–7</b>关系过滤</span><span><b>0</b>全部显示</span>
      </div>` +
     `</div>`;
   document.body.appendChild(pop);
@@ -3159,6 +3186,227 @@ $("hardReview").onclick = () => {
   if (!rows.length) return;
   $("hardModal").classList.add("hidden");
   startReview(rows.slice(0, RV_CAP).map(r => r.i));
+};
+
+/* ---------- 词根 / 词缀索引 ----------
+   D.morph 是按「词头」键控的一小段拆解：
+     { expect: [["pre","ex","向外"], ["root","spect","看"]] }
+   词卡里一次只看得见一个词的拆解，看不出这批词本来是一家人。这里把它
+   反过来聚成「一个词根 → 一串同根词」—— -spect- → expect / inspect /
+   respect / suspect，把散词变词串，这才是词根最该起的作用。
+
+   不新增任何数据文件：全部由已载入词层的 D.morph 现算，新块进来时重建
+   （见 APP_MERGE 里的 rootIdx = null），所以页面会随载入自己补齐。 */
+const ROOT_KIND_CN = { pre: "前缀", root: "词根", suf: "后缀" };
+const ROOT_CAP = 400;                 /* 一次最多画多少组：够翻，也不至于卡 */
+
+function rootBuild() {
+  const maps = { root: new Map(), pre: new Map(), suf: new Map() };
+  for (const w in D.morph) {
+    const segs = D.morph[w];
+    if (!segs || !segs.length) continue;
+    const i = D.idx[w];
+    if (i === undefined) continue;            /* 只收词表内的词 */
+    for (const seg of segs) {
+      const kind = seg[0], t = seg[1], m = maps[kind];
+      if (!m || !t) continue;
+      let e = m.get(t);
+      if (!e) {
+        e = { t: t, kind: kind, gloss: seg[2] || "", words: [], seen: new Set() };
+        m.set(t, e);
+      } else if (!e.gloss && seg[2]) e.gloss = seg[2];
+      if (e.seen.has(i)) continue;            /* 同一个词的两段同型词缀（如 able）只算一次 */
+      e.seen.add(i);
+      e.words.push(i);
+    }
+  }
+  const all = [];
+  ["root", "pre", "suf"].forEach(kind => maps[kind].forEach(e => {
+    delete e.seen;
+    /* 组内按词层升序：先看到最常用的那几个，串记才有抓手 */
+    e.words.sort((a, b) => (D.band[a] - D.band[b]) || (a - b));
+    e.best = D.band[e.words[0]] || 99;         /* 该词根里最常用的那个词在第几层 */
+    all.push(e);
+  }));
+  /* 组间排序：词数多的在前（串得越长越值得看），再按最常见词的词层，最后按字母 */
+  all.sort((a, b) =>
+    (b.words.length - a.words.length) || (a.best - b.best) ||
+    (a.t < b.t ? -1 : a.t > b.t ? 1 : 0));
+  return all;
+}
+function rootList() { return rootIdx || (rootIdx = rootBuild()); }
+
+let rootMode = "all", rootQuery = "", rootMultiOnly = true;
+const rootExpanded = new Set();        /* 已展开的分组，键 = kind + ":" + 词根 */
+let rootFocus = "";                    /* 从词卡点进来时要高亮定位的那一组 */
+const rootKeyOf = e => e.kind + ":" + e.t;
+
+/* 列表页同款的一行简短释义（清洗掉换行、引号、多余空白） */
+function zhBrief(i, n) {
+  return String(D.trans[i] || "").replace(/\\[rnt]/g, " ").replace(/["<>]/g, "")
+    .replace(/\s+/g, " ").trim().split(/[；;]/)[0].slice(0, n || 20);
+}
+
+function rootFiltered() {
+  const all = rootList();
+  const q = rootQuery.trim().toLowerCase();
+  if (!q && rootMode === "all" && !rootMultiOnly) return { all: all, rows: all };
+  const rows = all.filter(e => {
+    if (rootMode !== "all" && e.kind !== rootMode) return false;
+    if (rootMultiOnly && e.words.length < 2) return false;
+    if (!q) return true;
+    if (e.t.toLowerCase().indexOf(q) >= 0) return true;
+    if (e.gloss && e.gloss.toLowerCase().indexOf(q) >= 0) return true;
+    /* 也可以直接搜单词或中文释义，反查它挂在哪个词根下 */
+    for (const i of e.words) {
+      if (D.words[i].toLowerCase().indexOf(q) >= 0) return true;
+      if (String(D.trans[i] || "").toLowerCase().slice(0, 160).indexOf(q) >= 0) return true;
+    }
+    return false;
+  });
+  return { all: all, rows: rows };
+}
+
+function rootChip(i) {
+  const zh = zhBrief(i, 16);
+  const tip = D.words[i] + " · " + BAND_NAMES[D.band[i]] + " 词层（第 " + BAND_RANGE[D.band[i]] +
+    " 词）· " + zhBrief(i, 90) + " · 点击跳到词网并发音";
+  return '<span class="lw s' + statusOf(i) + (i === current ? " on" : "") + '" data-i="' + i +
+    '" title="' + esc(tip) + '"><b>' + esc(D.words[i]) + "</b>" +
+    (zh ? "<i>" + esc(zh) + "</i>" : "") + "</span>";
+}
+
+function renderRoot() {
+  if (!$("rootBody")) return;
+  const st = rootFiltered();
+  const shown = st.rows.slice(0, ROOT_CAP);
+  const cover = new Set();
+  st.rows.forEach(e => e.words.forEach(i => cover.add(i)));
+
+  $("rootSub").textContent = st.rows.length
+    ? "共 " + st.rows.length + " 组 · 覆盖 " + cover.size + " 个词" +
+      (rootMultiOnly ? "" : " · 含只出现 1 次的") + partsHint()
+    : (st.all.length
+        ? "没有符合筛选条件的词根" + partsHint()
+        : "还没有载入带词根拆解的词层" + partsHint());
+
+  $("rootBody").innerHTML = shown.length
+    ? shown.map(e => {
+        const k = rootKeyOf(e), open = rootExpanded.has(k);
+        const seg = '<span class="morph"><span class="seg ' + e.kind + '">' + esc(e.t) +
+          (e.gloss ? "<i>" + esc(e.gloss) + "</i>" : "") + "</span></span>";
+        return '<div class="rgroup' + (open ? " open" : "") + (k === rootFocus ? " focus" : "") +
+          '" data-k="' + esc(k) + '">' +
+          '<div class="rhead" role="button" tabindex="0" title="展开 / 收起这组同根词">' +
+            seg +
+            '<span class="rcount">' + e.words.length + " 词</span>" +
+            '<span class="rkind">' + ROOT_KIND_CN[e.kind] + "</span>" +
+            '<span class="rarrow">' + (open ? "▾" : "▸") + "</span>" +
+          "</div>" +
+          (open ? '<div class="rwords">' + e.words.map(rootChip).join("") + "</div>" : "") +
+          "</div>";
+      }).join("") +
+      (st.rows.length > shown.length
+        ? '<div class="hmore">共 ' + st.rows.length + " 组，先显示前 " + shown.length +
+          " 组 · 用上面的筛选框缩小范围</div>"
+        : "")
+    : '<div class="rempty">' + (st.all.length
+        ? "没有符合筛选条件的词根"
+        : "还没有载入带词根拆解的词层 🧩<br>词层会随时补进，载入完自动刷新。") + "</div>";
+
+  const btn = $("rootToggleAll");
+  if (btn) {
+    btn.disabled = !shown.length;
+    const anyOpen = shown.some(e => rootExpanded.has(rootKeyOf(e)));
+    btn.textContent = anyOpen ? "全部收起" : "全部展开";
+  }
+}
+
+/* 打开词根页。带 kind/text 时为「从词卡某个词根段点进来」，要定位到那一组 */
+function openRoot(kind, text) {
+  if (!$("rootModal")) return;
+  if (kind && text) {
+    rootQuery = ""; $("rootFilter").value = "";
+    rootMode = "all";
+    $("rootSeg").querySelectorAll("button").forEach(x => x.classList.toggle("on", x.dataset.f === "all"));
+    /* 目标词根可能只出现在一个词里，先把「只看 ≥2 词」放开，否则会定位不到 */
+    rootMultiOnly = false; $("rootMulti").checked = false;
+    rootExpanded.clear();
+    rootFocus = kind + ":" + text;
+    rootExpanded.add(rootFocus);
+  } else {
+    rootFocus = "";
+  }
+  $("rootModal").classList.remove("hidden");
+  renderRoot();
+  if (rootFocus) requestAnimationFrame(() => {
+    const el = Array.from($("rootBody").querySelectorAll(".rgroup"))
+      .find(g => g.dataset.k === rootFocus);
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: "center" });
+  });
+}
+
+$("rootBtn").onclick = () => openRoot();
+$("rootClose").onclick = () => $("rootModal").classList.add("hidden");
+$("rootModal").addEventListener("click", e => {
+  if (e.target === $("rootModal")) $("rootModal").classList.add("hidden");
+});
+$("rootFilter").addEventListener("input", e => {
+  rootQuery = e.target.value; rootFocus = ""; renderRoot();
+});
+$("rootSeg").addEventListener("click", e => {
+  const b = e.target.closest("button[data-f]");
+  if (!b) return;
+  rootMode = b.dataset.f; rootFocus = "";
+  $("rootSeg").querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b));
+  renderRoot();
+});
+$("rootMulti").addEventListener("change", e => {
+  rootMultiOnly = e.target.checked; rootFocus = ""; renderRoot();
+});
+$("rootToggleAll").onclick = () => {
+  const shown = rootFiltered().rows.slice(0, ROOT_CAP);
+  if (shown.some(e => rootExpanded.has(rootKeyOf(e)))) rootExpanded.clear();
+  else shown.forEach(e => rootExpanded.add(rootKeyOf(e)));
+  renderRoot();
+};
+function rootToggleGroup(head) {
+  const g = head.closest(".rgroup");
+  if (!g) return;
+  const k = g.dataset.k;
+  if (rootExpanded.has(k)) rootExpanded.delete(k); else rootExpanded.add(k);
+  rootFocus = "";
+  renderRoot();
+}
+$("rootBody").addEventListener("click", e => {
+  const chip = e.target.closest(".lw");
+  if (chip) {
+    const i = +chip.dataset.i;
+    $("rootModal").classList.add("hidden");
+    go(i);
+    speak(D.words[i]);                 /* 点按本身是用户手势，iOS 也允许直接播 */
+    return;
+  }
+  const head = e.target.closest(".rhead");
+  if (head) rootToggleGroup(head);
+});
+$("rootBody").addEventListener("keydown", e => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const head = e.target.closest(".rhead");
+  if (!head) return;
+  e.preventDefault();
+  rootToggleGroup(head);
+});
+
+/* 供自动化测试/排查用：词根索引引擎 */
+window.COCA_ROOT = {
+  list: (kind) => rootList().filter(e => !kind || e.kind === kind)
+    .map(e => ({ t: e.t, kind: e.kind, gloss: e.gloss, n: e.words.length })),
+  words: (kind, t) => {
+    const e = rootList().find(x => x.kind === kind && x.t === t);
+    return e ? e.words.map(i => D.words[i]) : null;
+  },
+  state: () => ({ total: rootList().length, expanded: Array.from(rootExpanded), focus: rootFocus })
 };
 
 /* ---------- 易混词辨析弹窗 ---------- */
@@ -3826,6 +4074,11 @@ document.addEventListener("keydown", e => {
     if ($("listModal").classList.contains("hidden")) { renderList(true); $("listModal").classList.remove("hidden"); }
     else $("listModal").classList.add("hidden");
   }
+  /* 词根 / 词缀索引：I 开关 */
+  if (e.key === "i" || e.key === "I") {
+    if ($("rootModal").classList.contains("hidden")) openRoot();
+    else $("rootModal").classList.add("hidden");
+  }
   /* 易混词辨析：C 开关（当前词的形近 / 音近对比） */
   if (e.key === "c" || e.key === "C") {
     if ($("confModal").classList.contains("hidden")) openConfuseCurrent(); else closeConfuse();
@@ -3838,6 +4091,7 @@ document.addEventListener("keydown", e => {
   if (e.key === "Escape") {
     if (window.closeHelp) window.closeHelp();
     if (!$("hardModal").classList.contains("hidden")) $("hardModal").classList.add("hidden");
+    if (!$("rootModal").classList.contains("hidden")) $("rootModal").classList.add("hidden");
     if (!$("statModal").classList.contains("hidden")) closeStat();
     if (!$("confModal").classList.contains("hidden")) closeConfuse();
   }
