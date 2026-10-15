@@ -783,6 +783,7 @@ main { padding-bottom: env(safe-area-inset-bottom); }
 @media (max-width: 640px) {
   .coderow { font-size: 12.5px; }
   .codeta { height: 68px; }
+  .mini { display: none; }   /* 窄屏（手机）画布小，小地图反而碍事 */
 }
 
 /* ---------- 学习统计面板 ---------- */
@@ -877,6 +878,38 @@ main { padding-bottom: env(safe-area-inset-bottom); }
 }
 .datanote button.x { background: rgba(255, 255, 255, .16); padding: 5px 8px; }
 .datanote button:hover { filter: brightness(1.08); }
+
+/* ---------- 词性导航 tab：多义词按 名/动/形/副 一键切换 ---------- */
+.postabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 10px; }
+.postabs.hidden { display: none; }
+.ptab {
+  border: 1px solid var(--border); background: var(--panel); border-radius: 999px;
+  padding: 3px 10px; font-size: 12px; color: var(--muted); cursor: pointer;
+  line-height: 1.4; font-family: inherit;
+}
+.ptab i { font-style: normal; color: #94a3b8; font-size: 11px; margin-left: 2px; }
+.ptab em { font-style: normal; font-size: 11px; color: #b6c2d4; margin-left: 3px; }
+.ptab:hover { border-color: #c9d6ee; color: #334155; }
+.ptab.on { background: #eef4ff; border-color: #bfd3f7; color: #1d4ed8; }
+.ptab.on i { color: #6d92e8; }
+.ptab.on em { color: #8aa7e8; }
+
+/* ---------- 小地图：全局缩略 + 视口框，点击/拖拽定位，⤾ 复位 ---------- */
+.mini {
+  position: absolute; top: 52px; right: 12px; z-index: 5;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92); box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+  padding: 4px;
+}
+.mini.hidden { display: none; }
+.mini canvas { display: block; width: 150px; height: 104px; cursor: crosshair; touch-action: none; }
+.minibtn {
+  position: absolute; top: -9px; right: -9px; width: 22px; height: 22px;
+  border-radius: 50%; border: 1px solid var(--border); background: #fff;
+  color: #475569; font-size: 12px; line-height: 1; cursor: pointer;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.15); padding: 0;
+}
+.minibtn:hover { color: #1d4ed8; border-color: #bfd3f7; }
 
 /* ---- 易混词：面板区块（形近 / 音近）---- */
 .conf { display: flex; flex-wrap: wrap; gap: 6px; }

@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v36";
+const APP_VERSION = "v37";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -183,7 +183,9 @@ window.COCA_DATA = {
   chunkOf, needChunk, needExtra, needExtraDef,
   state: () => ({ chunks: Array.from(loadedChunk).sort((a, b) => a - b), extra: hasExtra, extraDef: hasExtraDef }),
   go: (w) => go(w),
-  expand: (i, o) => expand(i, o)
+  expand: (i, o) => expand(i, o),
+  zoom: () => zoomBeh,          /* 供测试构造/复位视口变换 */
+  resetView: () => resetView()
 };
 /* 易混词引擎（放在后面定义，这里先挂个转发壳，方便测试/排查直接调用） */
 window.COCA_CONF = {
@@ -525,12 +527,95 @@ function nodeFill(d) { return "url(#" + gradId(nodeBase(d)) + ")"; }
 /* 层级配色：上位词（更抽象）紫色系、下位词（更具体）青色系 */
 const LVLCOL = { up: "#8b5cf6", down: "#0ea5e9" };
 const lvlColor = lvl => (lvl < 0 ? LVLCOL.up : lvl > 0 ? LVLCOL.down : null);
-svg.call(d3.zoom().scaleExtent([0.25, 4]).on("zoom", e => {
+const zoomBeh = d3.zoom().scaleExtent([0.25, 4]).on("zoom", e => {
   g.attr("transform", e.transform);
   /* 缩得越小节点越挤：远观时把标签整体淡出，避免糊成一片；
      放大回来立刻恢复，不用重算布局 */
   gLabels.attr("opacity", e.transform.k < 0.7 ? 0.35 : 1);
-}));
+  drawMini();
+});
+svg.call(zoomBeh);
+
+/* ---------- 小地图 + 一键复位 ----------
+   展开很多词后容易「迷失」：小地图给出全局节点的缩略分布和当前视口框，
+   点击/拖拽直接跳过去；⤾（或快捷键 Z）把缩放/平移一次归零。 */
+const MINI_W = 150, MINI_H = 104;
+const miniCv = document.getElementById("miniCv");
+const miniWrap = document.getElementById("mini");
+const miniCtx = miniCv ? miniCv.getContext("2d") : null;
+let miniMap = null, miniInv = null, lastMini = 0, miniDrag = false;
+(function miniInit() {
+  if (!miniCtx) return;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  miniCv.width = MINI_W * dpr; miniCv.height = MINI_H * dpr;
+  miniCtx.scale(dpr, dpr);
+})();
+function drawMini(force) {
+  if (!miniCtx) return;
+  if (!nodes.length) { miniWrap.classList.add("hidden"); return; }
+  miniWrap.classList.remove("hidden");
+  const now = performance.now();
+  if (!force && now - lastMini < 120) return;   /* tick 每帧都来，小地图降频即可 */
+  lastMini = now;
+  const ctx = miniCtx;
+  ctx.clearRect(0, 0, MINI_W, MINI_H);
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  nodes.forEach(d => {
+    if (d.px == null || d.py == null) return;
+    if (d.px < x0) x0 = d.px;
+    if (d.px > x1) x1 = d.px;
+    if (d.py < y0) y0 = d.py;
+    if (d.py > y1) y1 = d.py;
+  });
+  if (x1 <= x0 || y1 <= y0) return;
+  const pad = 12, sw = x1 - x0, sh = y1 - y0;
+  const sc = Math.min((MINI_W - pad * 2) / sw, (MINI_H - pad * 2) / sh);
+  const ox = (MINI_W - sw * sc) / 2, oy = (MINI_H - sh * sc) / 2;
+  miniMap = p => [ox + (p[0] - x0) * sc, oy + (p[1] - y0) * sc];
+  miniInv = p => [(p[0] - ox) / sc + x0, (p[1] - oy) / sc + y0];
+  nodes.forEach(d => {
+    if (d.px == null) return;
+    const q = miniMap([d.px, d.py]);
+    ctx.beginPath();
+    ctx.arc(q[0], q[1], d.id === "w:" + current ? 2.6 : 1.6, 0, 6.2832);
+    ctx.globalAlpha = d.kind === "x" ? 0.45 : 0.85;
+    ctx.fillStyle = nodeBase(d);
+    ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+  const t = d3.zoomTransform(svg.node());
+  const a = miniMap([(0 - t.x) / t.k, (0 - t.y) / t.k]);
+  const b = miniMap([(width() - t.x) / t.k, (height() - t.y) / t.k]);
+  ctx.fillStyle = "rgba(37,99,235,0.10)";
+  ctx.fillRect(a[0], a[1], b[0] - a[0], b[1] - a[1]);
+  ctx.strokeStyle = "#2563eb";
+  ctx.lineWidth = 1.4;
+  ctx.strokeRect(a[0], a[1], b[0] - a[0], b[1] - a[1]);
+}
+/* 视图复位：缩放/平移归零（布局不动，只动镜头） */
+function resetView() {
+  svg.transition().duration(350).call(zoomBeh.transform, d3.zoomIdentity);
+}
+if (miniCv) {
+  const miniJump = e => {
+    if (!miniInv) return;
+    const r = miniCv.getBoundingClientRect();
+    const w = miniInv([e.clientX - r.left, e.clientY - r.top]);
+    const t = d3.zoomTransform(svg.node()), k = t.k;
+    svg.transition().duration(220).call(zoomBeh.transform,
+      d3.zoomIdentity.translate(width() / 2 - w[0] * k, height() / 2 - w[1] * k).scale(k));
+  };
+  miniCv.addEventListener("pointerdown", e => {
+    miniDrag = true;
+    try { miniCv.setPointerCapture(e.pointerId); } catch (err) {}
+    miniJump(e);
+  });
+  miniCv.addEventListener("pointermove", e => { if (miniDrag) miniJump(e); });
+  miniCv.addEventListener("pointerup", () => { miniDrag = false; });
+  miniCv.addEventListener("pointercancel", () => { miniDrag = false; });
+  const rb = document.getElementById("miniReset");
+  if (rb) rb.onclick = resetView;
+}
 
 const tooltip = document.getElementById("tooltip");
 
@@ -985,6 +1070,7 @@ const lvlOpacity = lvl =>
 
 /* 把模拟出来的平面坐标投到画面上：连线、节点、标签、投影柱全部在这里更新 */
 function paint() {
+  drawMini();               /* 布局每动一下，小地图跟着降频刷新 */
   const W = width(), H = height();
   CX = W / 2; CY = H / 2;
   /* 层间距：只影响层间的透视缩放与投影柱长度，层级本身的上下由分层带保证 */
@@ -1401,15 +1487,29 @@ const DOM_ZH = {
 function esc(s) {
   return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
-/* 词性 → 配色组 */
+/* 词性 → 配色组 / 词性导航分组 */
 function posGroup(t) {
   const k = (t || "").replace(/\./g, "").toLowerCase();
   if (k === "n" || k === "u") return "n";
   if (k === "v" || k === "vt" || k === "vi") return "v";
   if (k === "a" || k === "s" || k === "adj") return "a";
   if (k === "adv" || k === "ad" || k === "r") return "adv";
+  if (k === "prep" || k === "p") return "prep";
+  if (k === "conj" || k === "c") return "conj";
+  if (k === "pron") return "pron";
+  if (k === "num") return "num";
+  if (k === "art") return "art";
+  if (k === "int" || k === "interj") return "int";
+  if (k === "aux" || k === "auxil" || k === "modal") return "aux";
   return "other";
 }
+/* 词性导航 tab 的展示名（缩写用学习者更熟的写法；数据里 a. = 形容词） */
+const POS_TAB_META = {
+  n: ["名词", "n."], v: ["动词", "v."], a: ["形容词", "adj."], adv: ["副词", "adv."],
+  prep: ["介词", "prep."], conj: ["连词", "conj."], pron: ["代词", "pron."],
+  num: ["数词", "num."], art: ["冠词", "art."], int: ["感叹词", "int."], aux: ["助动词", "aux."]
+};
+const POS_TAB_ORDER = ["n", "v", "a", "adv", "prep", "conj", "pron", "num", "art", "int", "aux"];
 /* 拆出开头的词性缩写（vt. / n. / a.）或领域标记（[计]） */
 function splitTag(s) {
   let m = /^\s*\[([^\]]{1,8})\]\s*/.exec(s);
@@ -1442,8 +1542,9 @@ function moreBtn(n) {
   const t = "显示全部 " + n + " 个义项 ▾";
   return '<button class="morebtn" data-open="' + t + '">' + t + "</button>";
 }
-/* 中文释义：每个词性/领域一行，行内义项用 · 分隔（短释义读起来像词典） */
-function fmtTrans(str, cap, fold) {
+/* 中文释义：每个词性/领域一行，行内义项用 · 分隔（短释义读起来像词典）。
+   fg = 词性过滤（词性导航 tab 选中时）：只留该词性的组，且整组展开不折叠 */
+function fmtTrans(str, cap, fold, fg) {
   cap = cap || 10; if (fold === undefined) fold = true;
   if (!str) return "";
   const raw = String(str).replace(/\\n/g, "；");
@@ -1455,6 +1556,15 @@ function fmtTrans(str, cap, fold) {
     if (!splitTag(f).tag && groups.length) groups[groups.length - 1].push(f);
     else groups.push([f]);
   });
+  if (fg) {
+    const kept = groups.filter(g => {
+      const t = splitTag(g[0]);
+      return t.tag && !t.dom && posGroup(t.multi && t.multi.length ? t.multi[0] : t.tag) === fg;
+    });
+    if (!kept.length) return "";
+    groups.length = 0; kept.forEach(g => groups.push(g));
+    fold = false; cap = Infinity;
+  }
   if (!groups.some(g => splitTag(g[0]).tag)) return esc(raw.trim());   /* 没有任何词性信息就按原文显示 */
   let idx = 0;
   const rows = [];
@@ -1484,8 +1594,9 @@ function fmtTrans(str, cap, fold) {
   if (!rows.length) return esc(raw.trim());
   return rows.join("") + (fold && idx > cap ? moreBtn(idx) : "");
 }
-/* 英文释义：每个词性一组，组内义项逐条编号（长句必须独占一行） */
-function fmtDef(str, cap) {
+/* 英文释义：每个词性一组，组内义项逐条编号（长句必须独占一行）。
+   fg = 词性过滤，选中时该组全量展开 */
+function fmtDef(str, cap, fg) {
   cap = cap || 6;
   if (!str) return "";
   const lines = String(str).split(/\\n|\n/).map(s => s.trim()).filter(Boolean);
@@ -1498,6 +1609,12 @@ function fmtDef(str, cap) {
     else if (last) last.items.push(t.rest || line);
     else groups.push({ tag: "", dom: false, items: [t.rest || line] });
   });
+  if (fg) {
+    const kept = groups.filter(g => g.tag && posGroup(g.multi && g.multi.length ? g.multi[0] : g.tag) === fg);
+    if (!kept.length) return "";
+    groups.length = 0; kept.forEach(g => groups.push(g));
+    cap = Infinity;
+  }
   let idx = 0;
   const html = groups.map(g => {
     const items0 = g.items.filter(Boolean);
@@ -1532,6 +1649,76 @@ function bindMore(root) {
   });
 }
 
+/* ---------- 词性导航：多义词按 n./v./adj. 一键切换 ----------
+   长词（light 24 义、run 20+ 义）全局折叠后动词/副词整行被藏起来，
+   扫一眼根本不知道还有别的词性。tab 直接给出「有哪些词性、各几个义项」，
+   点选后中文/英文释义联动只看该词性（该词性没有英文释义时明说）。 */
+function posTabsOf(str) {
+  const frags = String(str || "").replace(/\\n/g, "；").split(/[；;]/);
+  const m = new Map();
+  frags.forEach(f0 => {
+    const f = String(f0).trim(); if (!f) return;
+    const t = splitTag(f);
+    if (!t.tag || t.dom) return;
+    const g = posGroup(t.multi && t.multi.length ? t.multi[0] : t.tag);
+    if (!POS_TAB_META[g]) return;
+    if (!m.has(g)) m.set(g, { g, zh: POS_TAB_META[g][0], ab: POS_TAB_META[g][1], count: 0 });
+    m.get(g).count += t.rest.split(/[,，]/).filter(s => s.trim()).length || 1;
+  });
+  return POS_TAB_ORDER.filter(g => m.has(g)).map(g => m.get(g));
+}
+let posFilter = "";     /* 当前选中的词性分组（"" = 全部） */
+let senseIdx = null;    /* 当前面板显示的词表内词下标（null = 词表外 / 无） */
+function renderPosTabs(str) {
+  const box = $("dPos");
+  if (!box) return;
+  const tabs = posTabsOf(str);
+  if (tabs.length < 2) { box.classList.add("hidden"); box.innerHTML = ""; return; }
+  box.classList.remove("hidden");
+  box.innerHTML = '<button class="ptab all' + (posFilter ? "" : " on") + '" data-g="">全部</button>' +
+    tabs.map(t => '<button class="ptab' + (posFilter === t.g ? " on" : "") + '" data-g="' + t.g +
+      '" title="' + t.zh + '">' + t.zh + " <i>" + t.ab + "</i>" +
+      (t.count > 1 ? "<em>" + t.count + "</em>" : "") + "</button>").join("");
+}
+/* 中文释义 + 英文释义按当前词性过滤渲染（renderPanel / renderExtraPanel 共用） */
+function renderSenses(i) {
+  senseIdx = i;
+  const tr = D.trans[i];
+  $("dTrans").innerHTML = fmtTrans(tr, 10, undefined, posFilter) || "<span class='muted'>（暂无释义）</span>";
+  $("dTrans").classList.toggle("dim", !tr);
+  bindMore($("dTrans"));
+  /* 英文释义：按词性分组 + 逐条编号，超过 6 条先折叠；选中词性时整组展开。
+     选中词性但没有对应英文释义时，明说「暂无」而不是悄悄藏掉整块，
+     否则用户会以为渲染出了问题。 */
+  const defHTML = fmtDef(D.def[i], 6, posFilter);
+  $("dDef").innerHTML = defHTML || (posFilter ? '<span class="muted">该词性暂无英文释义（英文释义未覆盖全部词性）</span>' : "");
+  $("bDef").style.display = (defHTML || posFilter) ? "" : "none";
+  const note = $("dDefNote");
+  if (note) note.textContent = defHTML && posFilter ? " · 只看" + (POS_TAB_META[posFilter] || [])[0] : "";
+  bindMore($("dDef"));
+}
+/* 词性 tab 点击：中文/英文释义联动过滤（词表内走 senseIdx，词表外走 extraCurrent） */
+const posBox = $("dPos");
+if (posBox) posBox.onclick = ev => {
+  const b = ev.target.closest(".ptab");
+  if (!b) return;
+  ev.stopPropagation();
+  posFilter = b.dataset.g || "";
+  if (senseIdx !== null) {
+    renderPosTabs(D.trans[senseIdx]);
+    renderSenses(senseIdx);
+  } else if (extraCurrent) {
+    const k = D.extra ? D.extra.indexOf(extraCurrent) : -1;
+    if (k >= 0) {
+      const etr = extraTrans(k);
+      renderPosTabs(etr);
+      $("dTrans").innerHTML = fmtTrans(etr, 10, undefined, posFilter) || "（暂无释义，可点 🔊 听发音）";
+      $("dTrans").classList.toggle("dim", !etr);
+      bindMore($("dTrans"));
+    }
+  }
+};
+
 /* ---------- out-of-list related words ---------- */
 /* D.extraPhon / D.extraTrans are ARRAYS parallel to D.extra — index, not word key */
 let extraCurrent = null;
@@ -1555,7 +1742,10 @@ function renderExtraPanel(node) {
   $("masteryRow").style.display = "none";
   const _dd = $("dDue"); if (_dd) { _dd.style.display = "none"; _dd.textContent = ""; }
   const tr = extraTrans(i);
-  const th = fmtTrans(tr, 10);
+  senseIdx = null;                       /* 词表外词：tab 点击走 extraTrans 这条路 */
+  posFilter = "";
+  renderPosTabs(tr);
+  const th = fmtTrans(tr, 10, undefined, posFilter);
   $("dTrans").innerHTML = th || "（暂无释义，可点 🔊 听发音）";
   $("dTrans").classList.toggle("dim", !tr);
   bindMore($("dTrans"));
@@ -2036,15 +2226,10 @@ function renderPanel(i, extraNode) {
     }
   }
 
-  const tr = D.trans[i];
-  $("dTrans").innerHTML = fmtTrans(tr, 10) || "<span class='muted'>（暂无释义）</span>";
-  $("dTrans").classList.toggle("dim", !tr);
-  bindMore($("dTrans"));
-  /* 英文释义：按词性分组 + 逐条编号，超过 6 条先折叠 */
-  const defHTML = fmtDef(D.def[i], 6);
-  $("dDef").innerHTML = defHTML;
-  $("bDef").style.display = defHTML ? "" : "none";
-  bindMore($("dDef"));
+  /* 中文/英文释义 + 词性导航 tab（每次换词重置回「全部」） */
+  posFilter = "";
+  renderPosTabs(D.trans[i]);
+  renderSenses(i);
 
   /* morphology: 词根拆解 + 同根词 */
   const w = D.words[i];
@@ -2392,9 +2577,10 @@ function renderStats() {
        <div><i>1</i>点任意节点：朗读美式发音，右侧看音标与释义</div>
        <div><i>2</i>点相邻节点继续向外扩，像滚雪球一样把相关词连成一片</div>
        <div><i>3</i>线太密看不清：点左下「词关系」里的关系名，只看这一类</div>
-       <div><i>4</i>滚轮缩放、拖拽平移；双击节点重新展开它</div>
+       <div><i>4</i>滚轮缩放、拖拽平移；双击节点重新展开它；右上角小地图快速定位，⤾ 复位视图</div>
        <div><i>5</i>老记不住的词会自动收进顶栏「⚠ 难词」，攒够了一起攻克</div>
-       <div><i>6</i>顶栏「📊 统计」看每天的复习量、记忆保持率和下次复习排期</div>
+       <div><i>6</i>多义词用释义上方的词性标签一键切换：只看名词 / 动词 / 形容词的义项</div>
+       <div><i>7</i>顶栏「📊 统计」看每天的复习量、记忆保持率和下次复习排期</div>
        <div><i>7</i>词卡里的「易混词」列出形近 / 音近的词，点「辨析」并排对比、还能做小测（快捷键 C）</div>
      </div>` +
     `<div class="hsec">图例</div>` +
@@ -2420,7 +2606,7 @@ function renderStats() {
        <span><b>R</b>复习</span><span><b>N</b>下一个词</span><span><b>G</b>路径查找</span>
        <span><b>M</b>进度地图</span><span><b>L</b>单词列表</span><span><b>V</b>立体/平面</span>
        <span><b>P</b>发音</span><span><b>H</b>本说明</span><span><b>K</b>难词清单</span>
-       <span><b>S</b>学习统计</span><span><b>C</b>易混词辨析</span><span><b>1–7</b>关系过滤</span><span><b>0</b>全部显示</span>
+       <span><b>S</b>学习统计</span><span><b>C</b>易混词辨析</span><span><b>Z</b>复位视图</span><span><b>1–7</b>关系过滤</span><span><b>0</b>全部显示</span>
      </div>` +
     `</div>`;
   document.body.appendChild(pop);
@@ -3610,6 +3796,7 @@ document.addEventListener("keydown", e => {
   if (e.key === "r" || e.key === "R") { if (rvPaused) resumeReview(); else startReview(); return; }
   if (e.key === "n" || e.key === "N") nextWord();
   if (e.key === "f" || e.key === "F") focusCurrent();
+  if (e.key === "z" || e.key === "Z") resetView();
   if (e.key === "p" || e.key === "P") speakCurrent();
   if (e.key === "v" || e.key === "V") applyTilt(isFlat() ? 55 : 0, true);
   if (e.key === "g" || e.key === "G") {
@@ -3647,7 +3834,7 @@ document.addEventListener("keydown", e => {
 
 window.addEventListener("resize", () => {
   if (sim) { sim.force("center", d3.forceCenter(width() / 2, height() / 2)); sim.alpha(0.3).restart(); }
-  paintGrid(); paint();
+  paintGrid(); paint(); drawMini(true);
 });
 
 /* ---------- boot ----------
