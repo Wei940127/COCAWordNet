@@ -878,3 +878,85 @@ main { padding-bottom: env(safe-area-inset-bottom); }
 .datanote button.x { background: rgba(255, 255, 255, .16); padding: 5px 8px; }
 .datanote button:hover { filter: brightness(1.08); }
 
+/* ---- 易混词：面板区块（形近 / 音近）---- */
+.conf { display: flex; flex-wrap: wrap; gap: 6px; }
+.conf .cf {
+  display: inline-flex; align-items: center; gap: 5px;
+  border: 1px solid var(--border); background: #fbfcfe; border-radius: 6px;
+  padding: 3px 9px; font-size: 12.5px; cursor: pointer; color: var(--text);
+}
+.conf .cf i {
+  font-style: normal; font-size: 10px; border-radius: 4px;
+  padding: 0 4px; line-height: 15px; color: #fff;
+}
+.conf .cf.form i { background: #7c3aed; }
+.conf .cf.snd i { background: #0891b2; }
+.conf .cf.both i { background: #db2777; }
+.conf .cf.form:hover { border-color: #7c3aed; background: #f5f3ff; color: #6d28d9; }
+.conf .cf.snd:hover { border-color: #0891b2; background: #ecfeff; color: #0e7490; }
+.conf .cf.both:hover { border-color: #db2777; background: #fdf2f8; color: #be185d; }
+.conffoot { margin-top: 9px; }
+
+/* ---- 易混词辨析弹窗：对比表 ---- */
+.cbody { padding: 4px 2px 2px; }
+.cempty { padding: 24px 10px; text-align: center; color: #94a3b8; font-size: 13px; line-height: 1.8; }
+.ctabwrap { overflow-x: auto; }
+.ctab { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ctab th {
+  text-align: left; font-weight: 500; color: var(--muted); font-size: 11.5px;
+  padding: 6px 9px; border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+.ctab td { padding: 7px 9px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+.ctab tr.anchor td { background: var(--accent-soft); }
+.ctab tr.anchor td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.ctab .cw { white-space: nowrap; }
+.ctab .cword {
+  border: none; background: none; padding: 0; cursor: pointer;
+  font-size: 14px; font-weight: 600; color: var(--accent);
+}
+.ctab .cword:hover { text-decoration: underline; }
+.ctab .ctag {
+  font-style: normal; font-size: 10px; border-radius: 4px; margin-left: 6px;
+  padding: 1px 5px; color: #fff; vertical-align: 1px;
+}
+.ctab .ctag.form { background: #7c3aed; }
+.ctab .ctag.snd { background: #0891b2; }
+.ctab .ctag.both { background: #db2777; }
+.ctab .ctag.anchor { background: var(--accent); }
+.ctab .cp { color: #64748b; white-space: nowrap; font-size: 12.5px; }
+.ctab .cm { color: var(--text); line-height: 1.6; }
+.ctab .cs { text-align: right; white-space: nowrap; }
+.ctab .cspeak {
+  border: 1px solid var(--border); background: #fbfcfe; border-radius: 7px;
+  padding: 3px 7px; cursor: pointer; font-size: 12px;
+}
+.ctab .cspeak:hover { border-color: var(--accent); background: var(--accent-soft); }
+
+/* ---- 易混词辨析弹窗：考一考 ---- */
+.cqz {
+  margin-top: 14px; border: 1px solid var(--border); border-radius: 10px;
+  padding: 11px 13px 12px; background: #fbfcfe;
+}
+.cqhead { display: flex; align-items: baseline; justify-content: space-between; }
+.cqhead b { font-size: 13px; }
+.cqhead small { color: var(--muted); font-size: 11.5px; }
+.cqinstr { color: var(--muted); font-size: 11.5px; margin: 3px 0 7px; }
+.cqs { font-size: 14px; line-height: 1.75; margin: 0 0 11px; }
+.cqs .cblank { color: #b45309; letter-spacing: 1px; padding: 0 2px; border-bottom: 1.5px dashed #f59e0b; }
+.cqs .cblank.filled { color: #15803d; border-bottom-color: #16a34a; letter-spacing: 0; }
+.cqopts { display: flex; flex-wrap: wrap; gap: 7px; }
+.cqopts button {
+  border: 1px solid var(--border); background: #fff; border-radius: 8px;
+  padding: 6px 14px; font-size: 13.5px; cursor: pointer; color: var(--text);
+}
+.cqopts button:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
+.cqopts button:disabled { cursor: default; }
+.cqopts button.ok { border-color: #16a34a; background: #dcfce7; color: #15803d; font-weight: 600; }
+.cqopts button.bad { border-color: #ef4444; background: #fee2e2; color: #b91c1c; }
+.cqfoot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; min-height: 26px; }
+.cqfeed { font-size: 12.5px; color: var(--muted); }
+.cqfeed.good { color: #15803d; }
+.cqfeed.bad { color: #b91c1c; }
+.cqfeed .cqph { color: #64748b; }
+.cqfeed .cqzh { color: #475569; }
+

@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v35";
+const APP_VERSION = "v36";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -53,6 +53,11 @@ if (!D.extraPhon) D.extraPhon = [];
 if (!D.extraTrans) D.extraTrans = [];
 if (!window.APP_EX) window.APP_EX = {};
 
+/* 易混词的缓存：每合并进一个词层块就作废重算（新载入的词会带来新的邻居） */
+let confVer = 0;
+const confMemo = new Map();
+function confInvalidate() { confVer++; confMemo.clear(); }
+
 /* 载入完成后要顺带刷新的界面（单词列表 / 难词 / 统计 里的释义会补齐） */
 function afterPartLoad() {
   try {
@@ -85,6 +90,7 @@ window.APP_MERGE = function (c, o) {
     for (const w in o.ex) ex[w] = o.ex[w];
   }
   loadedChunk.add(c);
+  confInvalidate();
   afterPartLoad();
 };
 window.APP_MERGE_EXTRA = function (o) {
@@ -178,6 +184,12 @@ window.COCA_DATA = {
   state: () => ({ chunks: Array.from(loadedChunk).sort((a, b) => a - b), extra: hasExtra, extraDef: hasExtraDef }),
   go: (w) => go(w),
   expand: (i, o) => expand(i, o)
+};
+/* 易混词引擎（放在后面定义，这里先挂个转发壳，方便测试/排查直接调用） */
+window.COCA_CONF = {
+  of: w => { const i = typeof w === "number" ? w : D.idx[String(w).toLowerCase()]; return i === undefined ? null : confusableOf(i); },
+  items: w => { const i = typeof w === "number" ? w : D.idx[String(w).toLowerCase()]; return i === undefined ? null : confItems(i, 8, 4).map(x => ({ w: D.words[x.j], tag: confTagOf(x.o) })); },
+  quiz: () => (cq && cq.cur ? { type: cq.cur.type, right: D.words[cq.cur.j], opts: cq.opts.map(j => D.words[j]), done: cq.done, total: cq.total, score: cq.right } : null)
 };
 
 /* ---------- relation meta ---------- */
@@ -1551,6 +1563,8 @@ function renderExtraPanel(node) {
   $("dDef").innerHTML = "";
   $("bMorph").style.display = "none";
   $("bColl").style.display = "none";
+  $("bConf").style.display = "none";
+  $("dConf").innerHTML = "";
   $("dFamNote").textContent = "";
   $("dFam").innerHTML = "<span class='muted'>词表外词汇，无词族数据</span>";
   $("extInfo").classList.add("hidden");
@@ -1614,6 +1628,310 @@ function exFormsOf(i) {
   return Array.from(set);
 }
 
+/* ---------- 易混词：近形 / 近音 ----------
+   完全由词表 + 音标算出，不依赖任何外部数据：
+   · 近形 = 拼写做 Damerau-Levenshtein（相邻换位算 1 步，抓 quiet/quite 这类）
+   · 近音 = 音标归一化后比较，并要求「辅音骨架」基本一致，
+            否则 bad/bed/bid 这种会全被算成一类
+   同一词族的词（effect / effective）不算易混，先排除。 */
+const CONF_FORM_TH = 0.72;      /* 拼写相似度门槛：约等于 6 个字母错 2 个 */
+const CONF_SND_TH = 0.80;       /* 发音相似度门槛 */
+const CONF_KEEP = 12;           /* 每个词最多留这么多候选（展示时再截） */
+
+function _osa(a, b) {           /* Damerau-Levenshtein（最优字符串对齐） */
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  if (Math.abs(m - n) > 3) return 99;      /* 长度差太多直接出局，省时间 */
+  const d = [];
+  for (let i = 0; i <= m; i++) { d.push(new Array(n + 1)); d[i][0] = i; }
+  for (let j = 0; j <= n; j++) d[0][j] = j;
+  for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++) {
+    const c = a[i - 1] === b[j - 1] ? 0 : 1;
+    let v = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + c);
+    if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1])
+      v = Math.min(v, d[i - 2][j - 2] + 1);
+    d[i][j] = v;
+  }
+  return d[m][n];
+}
+
+/* 一个词可能标了多个读音，用 . 或 ; 分隔（desert = 'dezәt. di'sә:t）——取第一个（最常用） */
+function _firstPhon(p) { return String(p || "").split(/[.;]/)[0]; }
+/* 音标归一化：① 取首个读音 ② 双元音合字（数据里 eɪ 写成 i+e 两个字符）
+   ③ 去重音（ASCII ' 与 IPA ˈˌ）、长度符 :、括号、点、空格 ④ 转小写 */
+const _DIGRAPH = { ei: "e", ai: "a", au: "a", ou: "o", "ɔi": "o" };
+function _phonKey(p) {
+  return _firstPhon(p).toLowerCase()
+    .replace(/ei|ai|au|ou|ɔi/g, m => _DIGRAPH[m])
+    .replace(/['ˈˌ.:()\s\u02c8\u02cc-]/g, "");
+}
+/* 元音集合：ECDICT 用的是「西里尔 ә」(U+04D9) 而不是拉丁 ə(U+0259)，两个都收 */
+const _VOWELS = new Set("aeiouæɑɒɔəɜʌɐɪʊɛɘɵøœyә".split(""));
+/* 元音按粗类归并；i/ɪ 与 e/æ 必须分开，否则 peace/pass 会被误判成同音 */
+const _VCLS = { a: "A", "ɑ": "A", "ɒ": "A", "ʌ": "V", "ɐ": "V",
+  "ə": "@", "ә": "@", "ɜ": "@", "ɘ": "@",
+  e: "E", "æ": "E", "ɛ": "E", i: "I", "ɪ": "I", y: "I",
+  u: "U", "ʊ": "U", o: "O", "ɔ": "O", "ø": "O", "œ": "O", "ɵ": "O" };
+/* 辅音清浊归并：loose/lose、advice/advise、proof/prove 只差一个清浊音 */
+const _CCLS = { s: "S", z: "S", f: "F", v: "F", "ʃ": "X", "ʒ": "X", "θ": "Q", "ð": "Q" };
+function _cls(ch) { return _VOWELS.has(ch) ? (_VCLS[ch] || "V") : (_CCLS[ch] || ch); }
+function _sndKey(p) { let o = ""; for (const ch of _phonKey(p)) o += _cls(ch); return o; }
+function _consSkel(p) { let o = ""; for (const ch of _phonKey(p)) if (!_VOWELS.has(ch)) o += _cls(ch); return o; }
+
+/* 同词族的词先排除（D.fam[i] 是 [[词形, 词频], ...]）。fam 随词层分块载入，所以要跟着作废重算。 */
+let _famSets = null, _famVer = -1;
+function _famSetOf(i) {
+  if (_famVer !== confVer) { _famSets = new Array(N); _famVer = confVer; }
+  let s = _famSets[i];
+  if (!s) {
+    s = new Set();
+    const f = D.fam && D.fam[i];
+    if (f) for (let k = 0; k < f.length; k++) {
+      const p = f[k];
+      if (p) s.add(String(p[0] === undefined ? p : p[0]).toLowerCase());
+    }
+    _famSets[i] = s;
+  }
+  return s;
+}
+function _sameFam(i, j) {
+  return _famSetOf(i).has(D.words[j].toLowerCase()) || _famSetOf(j).has(D.words[i].toLowerCase());
+}
+
+/* 只统计「已载入词层」里的词；没载入的 phon 是 undefined，自然不参与比较 */
+function confusableOf(i) {
+  const hit = confMemo.get(i);
+  if (hit && hit.ver === confVer) return hit.val;
+  const wa = D.words[i].toLowerCase();
+  const pa = D.phon[i];
+  const sa = pa ? _sndKey(pa) : "";
+  const ca = pa ? _consSkel(pa) : "";
+  const form = [], sound = [];
+  for (let j = 0; j < N; j++) {
+    if (j === i) continue;
+    const wb = D.words[j].toLowerCase();
+    if (Math.abs(wa.length - wb.length) <= 2) {
+      const d = _osa(wa, wb);
+      if (d <= 2) {
+        const s = 1 - d / Math.max(wa.length, wb.length);
+        if (s >= CONF_FORM_TH && !_sameFam(i, j)) form.push({ j, s });
+      }
+    }
+    const pb = D.phon[j];
+    if (pa && pb) {
+      const sb = _sndKey(pb);
+      if (Math.abs(sa.length - sb.length) <= 3 && _osa(ca, _consSkel(pb)) <= 1) {
+        const d = _osa(sa, sb);
+        if (d <= 2) {
+          const s = 1 - d / Math.max(sa.length, sb.length);
+          if (s >= CONF_SND_TH && !_sameFam(i, j)) sound.push({ j, s });
+        }
+      }
+    }
+  }
+  const cmp = (x, y) => (y.s - x.s) || (D.band[x.j] - D.band[y.j]);
+  form.sort(cmp); sound.sort(cmp);
+  const val = { form: form.slice(0, CONF_KEEP), sound: sound.slice(0, CONF_KEEP) };
+  confMemo.set(i, { ver: confVer, val });
+  return val;
+}
+
+/* 近形 / 近音合并去重，tag = form | snd | both。
+   「又形近又音近」的最值得看，排最前；纯音近的候选最多留 sndOnlyMax 条，
+   免得一堆 -fect / -lect 之类的弱候选把真正的形近词挤出去。 */
+function confItems(i, max, sndOnlyMax) {
+  const c = confusableOf(i);
+  const m = new Map();
+  c.form.forEach(x => { const o = m.get(x.j) || {}; o.form = true; o.sf = x.s; m.set(x.j, o); });
+  c.sound.forEach(x => { const o = m.get(x.j) || {}; o.snd = true; o.ss = x.s; m.set(x.j, o); });
+  const arr = [];
+  m.forEach((o, j) => arr.push({
+    j, o, score: Math.max(o.sf || 0, o.ss || 0) + (o.form && o.snd ? 0.1 : 0)
+  }));
+  arr.sort((a, b) => (b.score - a.score) || (D.band[a.j] - D.band[b.j]));
+  if (!sndOnlyMax) return max ? arr.slice(0, max) : arr;
+  const out = []; let n = 0;
+  for (const x of arr) {
+    if (!x.o.form) { if (n >= sndOnlyMax) continue; n++; }
+    out.push(x);
+  }
+  return max ? out.slice(0, max) : out;
+}
+const confTagOf = o => (o.form && o.snd ? "both" : o.form ? "form" : "snd");
+const CONF_TAG_TEXT = { form: "形近", snd: "音近", both: "形音" };
+
+/* 面板里的「易混词」区块：只列词，点击跳过去并朗读 */
+function renderConf(i) {
+  const box = $("dConf");
+  if (!box) return;
+  const items = confItems(i, 8, 4);
+  const loading = loadedChunk.size < CHUNK_N;
+  $("bConf").style.display = "";
+  $("dConfNote").textContent = items.length
+    ? (loading ? "形状 / 发音相近 · 其余词层载入中…" : "形状 / 发音相近")
+    : (loading ? "词层载入中…" : "");
+  box.innerHTML = items.map(x =>
+    '<button class="cf ' + confTagOf(x.o) + '" data-j="' + x.j + '"><i>' +
+    CONF_TAG_TEXT[confTagOf(x.o)] + "</i>" + escHTML(D.words[x.j]) + "</button>"
+  ).join("") || '<span class="muted">' + (loading ? "载入中…" : "没有找到形近 / 音近的词") + "</span>";
+  box.querySelectorAll(".cf").forEach(b => {
+    b.onclick = () => { const j = +b.dataset.j; go(D.words[j]); speak(D.words[j]); };
+  });
+  const btn = $("dConfBtn");
+  if (btn) btn.style.display = items.length >= 1 ? "" : "none";
+}
+
+/* 词层陆续载入时，面板若正开着，易混词区块要跟着补齐（afterPartLoad 会调这里） */
+function fillPanelIfPending() {
+  if (current === null || current === undefined) return;
+  const b = $("bConf");
+  if (!b || b.style.display === "none") return;
+  renderConf(current);
+}
+
+/* 一次把所有词层都要来（辨析需要全局比对，光靠当前块不够） */
+function needAll() {
+  const ps = [];
+  for (let c = 1; c <= CHUNK_N; c++) if (!chunkReady(c)) ps.push(needChunk(c));
+  return ps.length ? Promise.all(ps) : Promise.resolve();
+}
+
+/* ---------- 辨析弹窗：对比表 + 考一考 ---------- */
+let confIdx = null, confList = [], cq = null;
+
+function confShuffle(a) { for (let k = a.length - 1; k > 0; k--) { const r = Math.floor(Math.random() * (k + 1)); const t = a[k]; a[k] = a[r]; a[r] = t; } return a; }
+
+function openConfuse(i) {
+  const m = $("confModal");
+  if (!m) return;
+  confIdx = i;
+  m.classList.remove("hidden");
+  $("confSub").textContent = "「" + D.words[i] + "」和它容易混的词";
+  $("confBody").innerHTML = '<div class="partload"><i class="spin"></i>正在收集这些词的释义…</div>';
+  needAll().catch(() => {}).then(() => {
+    if (confIdx !== i) return;                 /* 期间又点了别的词 */
+    const items = confItems(i, 6, 3);
+    const idxs = [i];
+    items.forEach(x => { if (idxs.indexOf(x.j) < 0) idxs.push(x.j); });
+    confList = idxs.slice(0, 6);
+    renderConfuse();
+  });
+}
+function closeConfuse() { const m = $("confModal"); if (m) m.classList.add("hidden"); }
+
+function renderConfuse() {
+  const body = $("confBody");
+  if (!body) return;
+  const i = confIdx;
+  if (confList.length < 2) {
+    body.innerHTML = '<div class="cempty">暂时没找到和「' + escHTML(D.words[i]) +
+      '」形近 / 音近的词。<br><small>换一个词试试，或等其余词层载入完成再打开。</small></div>';
+    return;
+  }
+  const cf = confusableOf(i);
+  const rows = confList.map(j => {
+    const isF = cf.form.some(x => x.j === j), isS = cf.sound.some(x => x.j === j);
+    const tag = isF && isS ? "both" : isF ? "form" : isS ? "snd" : "";
+    const ph = D.phon[j];
+    const tr = fmtTrans(D.trans[j], 70);
+    return '<tr class="' + (j === i ? "anchor" : "") + '">' +
+      '<td class="cw"><button class="cword" data-j="' + j + '" title="跳到词网并朗读">' + escHTML(D.words[j]) + "</button>" +
+      (j === i ? '<i class="ctag anchor">本词</i>' : (tag ? '<i class="ctag ' + tag + '">' + CONF_TAG_TEXT[tag] + "</i>" : "")) + "</td>" +
+      '<td class="cp">' + (ph ? "/" + escHTML(ph) + "/" : "—") + "</td>" +
+      '<td class="cm">' + (tr || "<span class='muted'>（暂无释义）</span>") + "</td>" +
+      '<td class="cs"><button class="cspeak" data-w="' + escHTML(D.words[j]) + '" title="朗读">🔊</button></td>' +
+      "</tr>";
+  }).join("");
+  body.innerHTML =
+    '<div class="ctabwrap"><table class="ctab"><thead><tr><th>单词</th><th>音标</th><th>中文释义</th><th></th></tr></thead><tbody>' +
+    rows + "</tbody></table></div>" +
+    '<div class="cqz" id="cqz"></div>';
+  body.querySelectorAll(".cword").forEach(b => {
+    b.onclick = () => { const j = +b.dataset.j; closeConfuse(); go(D.words[j]); speak(D.words[j]); };
+  });
+  body.querySelectorAll(".cspeak").forEach(b => { b.onclick = () => speak(b.dataset.w, b); });
+  cqStart();
+}
+
+/* ---- 考一考：优先出「例句填空」（例句都含目标词），没例句就考中文释义 ---- */
+function cqStart() {
+  cq = { right: 0, total: 0, cur: null, opts: [], done: false };
+  cqNext();
+}
+function cqPick() {
+  const pool = confList.filter(j => D.words[j]);
+  if (pool.length < 2) return null;
+  const cand = confShuffle(pool.slice());
+  for (const j of cand) {
+    const ex = window.APP_EX && window.APP_EX[D.words[j]];
+    if (ex && ex[0]) {
+      const b = cqBlank(ex[0], exFormsOf(j));
+      if (b) return { type: "blank", j, zh: ex[1] || "", b };
+    }
+  }
+  return { type: "mean", j: cand[0] };
+}
+/* 把例句里的目标词挖空；目标词可能以变形出现，用词族词形匹配 */
+function cqBlank(sentence, forms) {
+  const list = (forms || []).filter(Boolean).map(f => String(f).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .sort((a, b) => b.length - a.length);
+  if (!list.length) return null;
+  let m;
+  try { m = new RegExp("\\b(" + list.join("|") + ")\\b", "i").exec(sentence); } catch (e) { return null; }
+  if (!m) return null;
+  return { before: sentence.slice(0, m.index), hit: m[0], after: sentence.slice(m.index + m[0].length) };
+}
+function cqNext() {
+  const box = $("cqz");
+  if (!box) return;
+  const q = cqPick();
+  if (!q) { box.innerHTML = ""; return; }
+  const others = confShuffle(confList.filter(j => j !== q.j)).slice(0, 3);
+  const opts = confShuffle([q.j].concat(others));
+  cq.cur = q; cq.opts = opts; cq.done = false;
+  box.innerHTML =
+    '<div class="cqhead"><b>考一考</b><small id="cqScore">已答 ' + cq.total + " · 对 " + cq.right + "</small></div>" +
+    '<p class="cqinstr">' + (q.type === "blank" ? "读句子，选出该填的词" : "下面这条中文释义是哪个词？") + "</p>" +
+    '<p class="cqs">' + (q.type === "blank"
+      ? escHTML(q.b.before) + '<b class="cblank" id="cqBlank">＿＿＿＿</b>' + escHTML(q.b.after)
+      : fmtTrans(D.trans[q.j], 90)) + "</p>" +
+    '<div class="cqopts" id="cqOpts">' + opts.map(j =>
+      '<button type="button" data-j="' + j + '">' + escHTML(D.words[j]) + "</button>").join("") + "</div>" +
+    '<div class="cqfoot"><span class="cqfeed" id="cqFeed"></span>' +
+    '<button type="button" class="btn mini hidden" id="cqNextBtn">下一题 ▸</button></div>';
+  $("cqOpts").querySelectorAll("button").forEach(b => { b.onclick = () => cqAnswer(+b.dataset.j); });
+  $("cqNextBtn").onclick = () => cqNext();
+}
+function cqAnswer(choice) {
+  if (cq.done) return;
+  cq.done = true;
+  const q = cq.cur, right = q.j;
+  const good = choice === right;
+  cq.total++; if (good) cq.right++;
+  const ph = D.phon[right];
+  const zh = q.type === "blank" ? (q.zh || "") : String(D.trans[right] || "").slice(0, 60);
+  $("cqOpts").querySelectorAll("button").forEach(b => {
+    const j = +b.dataset.j;
+    b.disabled = true;
+    if (j === right) b.classList.add("ok");
+    else if (j === choice) b.classList.add("bad");
+  });
+  if (q.type === "blank" && $("cqBlank")) {
+    $("cqBlank").textContent = q.b.hit;
+    $("cqBlank").classList.add("filled");
+  }
+  const feed = $("cqFeed");
+  feed.className = "cqfeed " + (good ? "good" : "bad");
+  feed.innerHTML = (good ? "✓ 对了" : "✗ 应该是 <b>" + escHTML(D.words[right]) + "</b>") +
+    (ph ? ' <span class="cqph">/' + escHTML(ph) + "/</span>" : "") +
+    (zh ? ' <span class="cqzh">' + escHTML(zh) + "</span>" : "");
+  $("cqScore").textContent = "已答 " + cq.total + " · 对 " + cq.right;
+  $("cqNextBtn").classList.remove("hidden");
+  if (!good) speak(D.words[right]);
+}
+
+
 /* 数据块还在路上时，面板先亮个「载入中」占位：点了没反应最让人困惑 */
 function showPartPending(i) {
   if (!panelPending("")) return;
@@ -1635,8 +1953,9 @@ function panelPending(bandText) {
   $("dTags").innerHTML = "";
   $("dTrans").innerHTML = '<div class="partload"><i class="spin"></i>释义正在载入…</div>';
   $("dDue").textContent = "";
-  ["bEx", "bDef", "bMorph", "bColl"].forEach(id => { const el = $(id); if (el) el.style.display = "none"; });
+  ["bEx", "bDef", "bMorph", "bColl", "bConf"].forEach(id => { const el = $(id); if (el) el.style.display = "none"; });
   $("dFam").innerHTML = "";
+  $("dConf").innerHTML = "";
   $("dRel").innerHTML = "";
   $("masteryRow").style.display = "none";
   return true;
@@ -1765,8 +2084,7 @@ function renderPanel(i, extraNode) {
 
   /* word family */
   const fam = D.fam[i] || [];
-  $("dFamNote").textContent = fam.length ? fam.length + " 个词形" : "";
-  $("dFam").innerHTML = fam.map(([f, c]) => {
+  $("dFamNote").textContent = fam.length ? fam.length + " 个词形" : "";  $("dFam").innerHTML = fam.map(([f, c]) => {
     const target = D.alias[f];
     if (target && target !== D.words[i] && D.idx[target] !== undefined) {
       return `<span class="jump" data-w="${target}"><b>${f}</b><i>${c}</i></span>`;
@@ -1776,6 +2094,9 @@ function renderPanel(i, extraNode) {
   $("dFam").querySelectorAll(".jump").forEach(el => {
     el.onclick = () => { go(el.dataset.w); speak(el.dataset.w); };
   });
+
+  /* 易混词：形近 / 音近，需要全局词表，所以可能随词层载入逐步补齐 */
+  renderConf(i);
 
   /* relations */
   const groups = relsOf(i);
@@ -2074,6 +2395,7 @@ function renderStats() {
        <div><i>4</i>滚轮缩放、拖拽平移；双击节点重新展开它</div>
        <div><i>5</i>老记不住的词会自动收进顶栏「⚠ 难词」，攒够了一起攻克</div>
        <div><i>6</i>顶栏「📊 统计」看每天的复习量、记忆保持率和下次复习排期</div>
+       <div><i>7</i>词卡里的「易混词」列出形近 / 音近的词，点「辨析」并排对比、还能做小测（快捷键 C）</div>
      </div>` +
     `<div class="hsec">图例</div>` +
     `<div class="li">
@@ -2098,7 +2420,7 @@ function renderStats() {
        <span><b>R</b>复习</span><span><b>N</b>下一个词</span><span><b>G</b>路径查找</span>
        <span><b>M</b>进度地图</span><span><b>L</b>单词列表</span><span><b>V</b>立体/平面</span>
        <span><b>P</b>发音</span><span><b>H</b>本说明</span><span><b>K</b>难词清单</span>
-       <span><b>S</b>学习统计</span><span><b>1–7</b>关系过滤</span><span><b>0</b>全部显示</span>
+       <span><b>S</b>学习统计</span><span><b>C</b>易混词辨析</span><span><b>1–7</b>关系过滤</span><span><b>0</b>全部显示</span>
      </div>` +
     `</div>`;
   document.body.appendChild(pop);
@@ -2641,6 +2963,16 @@ $("hardReview").onclick = () => {
   $("hardModal").classList.add("hidden");
   startReview(rows.slice(0, RV_CAP).map(r => r.i));
 };
+
+/* ---------- 易混词辨析弹窗 ---------- */
+function openConfuseCurrent() {
+  if (current === null || current === undefined) return;
+  if (extraCurrent) return;                 /* 词表外词没有词表内的邻近词 */
+  openConfuse(current);
+}
+$("dConfBtn").onclick = openConfuseCurrent;
+$("confClose").onclick = () => closeConfuse();
+$("confModal").addEventListener("click", e => { if (e.target === $("confModal")) closeConfuse(); });
 
 /* ---------- 复习会话（间隔重复） ---------- */
 const RV_CAP = 60;            /* 单次会话最多这么多张：一次刷不完就先做这一批 */
@@ -3296,6 +3628,10 @@ document.addEventListener("keydown", e => {
     if ($("listModal").classList.contains("hidden")) { renderList(true); $("listModal").classList.remove("hidden"); }
     else $("listModal").classList.add("hidden");
   }
+  /* 易混词辨析：C 开关（当前词的形近 / 音近对比） */
+  if (e.key === "c" || e.key === "C") {
+    if ($("confModal").classList.contains("hidden")) openConfuseCurrent(); else closeConfuse();
+  }
   /* 关系类型开关：1–7 依次对应图例里的七种关系，0 = 全部显示 */
   if (/^[1-7]$/.test(e.key)) { toggleRelType(+e.key - 1); e.preventDefault(); }
   if (e.key === "0") { clearRelFilter(); e.preventDefault(); }
@@ -3305,6 +3641,7 @@ document.addEventListener("keydown", e => {
     if (window.closeHelp) window.closeHelp();
     if (!$("hardModal").classList.contains("hidden")) $("hardModal").classList.add("hidden");
     if (!$("statModal").classList.contains("hidden")) closeStat();
+    if (!$("confModal").classList.contains("hidden")) closeConfuse();
   }
 });
 

@@ -65,7 +65,7 @@
   </div>
 
   <div class="stats" id="stats"></div>
-  <button id="verPill" class="verpill" title="当前版本 · 点一下检查更新">v35</button>
+  <button id="verPill" class="verpill" title="当前版本 · 点一下检查更新">v36</button>
 </header>
 
 <main>
@@ -153,6 +153,13 @@
       <div class="block" id="bDef" style="display:none">
         <h3>英文释义</h3>
         <div id="dDef" class="def"></div>
+      </div>
+
+      <!-- 易混词：形近 / 音近的词，可一键打开辨析对比表 + 小测 -->
+      <div class="block" id="bConf" style="display:none">
+        <h3>易混词 <small id="dConfNote"></small></h3>
+        <div id="dConf" class="conf"></div>
+        <div class="conffoot"><button id="dConfBtn" class="btn mini" type="button" title="快捷键 C">辨析这些词 ▸</button></div>
       </div>
 
       <div class="block" id="bMorph" style="display:none">
@@ -258,6 +265,16 @@
         <button id="statMapLink" class="btn mini" title="按词层查看学习进度（快捷键 M）">▦ 进度地图</button>
       </span>
     </div>
+  </div>
+</div>
+
+<div id="confModal" class="modal hidden">
+  <div class="modalCard wide">
+    <div class="mhead">
+      <b>易混词辨析 <small id="confSub"></small></b>
+      <button id="confClose" class="mclose" title="关闭（Esc）">✕</button>
+    </div>
+    <div id="confBody" class="cbody"></div>
   </div>
 </div>
 
