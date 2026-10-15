@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v37";
+const APP_VERSION = "v38";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -532,90 +532,19 @@ const zoomBeh = d3.zoom().scaleExtent([0.25, 4]).on("zoom", e => {
   /* 缩得越小节点越挤：远观时把标签整体淡出，避免糊成一片；
      放大回来立刻恢复，不用重算布局 */
   gLabels.attr("opacity", e.transform.k < 0.7 ? 0.35 : 1);
-  drawMini();
 });
 svg.call(zoomBeh);
 
-/* ---------- 小地图 + 一键复位 ----------
-   展开很多词后容易「迷失」：小地图给出全局节点的缩略分布和当前视口框，
-   点击/拖拽直接跳过去；⤾（或快捷键 Z）把缩放/平移一次归零。 */
-const MINI_W = 150, MINI_H = 104;
-const miniCv = document.getElementById("miniCv");
-const miniWrap = document.getElementById("mini");
-const miniCtx = miniCv ? miniCv.getContext("2d") : null;
-let miniMap = null, miniInv = null, lastMini = 0, miniDrag = false;
-(function miniInit() {
-  if (!miniCtx) return;
-  const dpr = Math.min(2, window.devicePixelRatio || 1);
-  miniCv.width = MINI_W * dpr; miniCv.height = MINI_H * dpr;
-  miniCtx.scale(dpr, dpr);
-})();
-function drawMini(force) {
-  if (!miniCtx) return;
-  if (!nodes.length) { miniWrap.classList.add("hidden"); return; }
-  miniWrap.classList.remove("hidden");
-  const now = performance.now();
-  if (!force && now - lastMini < 120) return;   /* tick 每帧都来，小地图降频即可 */
-  lastMini = now;
-  const ctx = miniCtx;
-  ctx.clearRect(0, 0, MINI_W, MINI_H);
-  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
-  nodes.forEach(d => {
-    if (d.px == null || d.py == null) return;
-    if (d.px < x0) x0 = d.px;
-    if (d.px > x1) x1 = d.px;
-    if (d.py < y0) y0 = d.py;
-    if (d.py > y1) y1 = d.py;
-  });
-  if (x1 <= x0 || y1 <= y0) return;
-  const pad = 12, sw = x1 - x0, sh = y1 - y0;
-  const sc = Math.min((MINI_W - pad * 2) / sw, (MINI_H - pad * 2) / sh);
-  const ox = (MINI_W - sw * sc) / 2, oy = (MINI_H - sh * sc) / 2;
-  miniMap = p => [ox + (p[0] - x0) * sc, oy + (p[1] - y0) * sc];
-  miniInv = p => [(p[0] - ox) / sc + x0, (p[1] - oy) / sc + y0];
-  nodes.forEach(d => {
-    if (d.px == null) return;
-    const q = miniMap([d.px, d.py]);
-    ctx.beginPath();
-    ctx.arc(q[0], q[1], d.id === "w:" + current ? 2.6 : 1.6, 0, 6.2832);
-    ctx.globalAlpha = d.kind === "x" ? 0.45 : 0.85;
-    ctx.fillStyle = nodeBase(d);
-    ctx.fill();
-  });
-  ctx.globalAlpha = 1;
-  const t = d3.zoomTransform(svg.node());
-  const a = miniMap([(0 - t.x) / t.k, (0 - t.y) / t.k]);
-  const b = miniMap([(width() - t.x) / t.k, (height() - t.y) / t.k]);
-  ctx.fillStyle = "rgba(37,99,235,0.10)";
-  ctx.fillRect(a[0], a[1], b[0] - a[0], b[1] - a[1]);
-  ctx.strokeStyle = "#2563eb";
-  ctx.lineWidth = 1.4;
-  ctx.strokeRect(a[0], a[1], b[0] - a[0], b[1] - a[1]);
-}
-/* 视图复位：缩放/平移归零（布局不动，只动镜头） */
+/* ---------- 一键复位视图 ----------
+   展开很多词后又缩放又拖拽，容易偏出画布找不到方向：
+   ⤾（视角控件里的按钮，或快捷键 Z）把缩放/平移一次归零，布局不动只动镜头。 */
 function resetView() {
   svg.transition().duration(350).call(zoomBeh.transform, d3.zoomIdentity);
 }
-if (miniCv) {
-  const miniJump = e => {
-    if (!miniInv) return;
-    const r = miniCv.getBoundingClientRect();
-    const w = miniInv([e.clientX - r.left, e.clientY - r.top]);
-    const t = d3.zoomTransform(svg.node()), k = t.k;
-    svg.transition().duration(220).call(zoomBeh.transform,
-      d3.zoomIdentity.translate(width() / 2 - w[0] * k, height() / 2 - w[1] * k).scale(k));
-  };
-  miniCv.addEventListener("pointerdown", e => {
-    miniDrag = true;
-    try { miniCv.setPointerCapture(e.pointerId); } catch (err) {}
-    miniJump(e);
-  });
-  miniCv.addEventListener("pointermove", e => { if (miniDrag) miniJump(e); });
-  miniCv.addEventListener("pointerup", () => { miniDrag = false; });
-  miniCv.addEventListener("pointercancel", () => { miniDrag = false; });
-  const rb = document.getElementById("miniReset");
+(function bindReset() {
+  const rb = document.getElementById("viewReset");
   if (rb) rb.onclick = resetView;
-}
+})();
 
 const tooltip = document.getElementById("tooltip");
 
@@ -1070,7 +999,6 @@ const lvlOpacity = lvl =>
 
 /* 把模拟出来的平面坐标投到画面上：连线、节点、标签、投影柱全部在这里更新 */
 function paint() {
-  drawMini();               /* 布局每动一下，小地图跟着降频刷新 */
   const W = width(), H = height();
   CX = W / 2; CY = H / 2;
   /* 层间距：只影响层间的透视缩放与投影柱长度，层级本身的上下由分层带保证 */
@@ -2577,11 +2505,11 @@ function renderStats() {
        <div><i>1</i>点任意节点：朗读美式发音，右侧看音标与释义</div>
        <div><i>2</i>点相邻节点继续向外扩，像滚雪球一样把相关词连成一片</div>
        <div><i>3</i>线太密看不清：点左下「词关系」里的关系名，只看这一类</div>
-       <div><i>4</i>滚轮缩放、拖拽平移；双击节点重新展开它；右上角小地图快速定位，⤾ 复位视图</div>
+       <div><i>4</i>滚轮缩放、拖拽平移；双击节点重新展开它；按 Z（或点右下角 ⤾）把视图复位</div>
        <div><i>5</i>老记不住的词会自动收进顶栏「⚠ 难词」，攒够了一起攻克</div>
        <div><i>6</i>多义词用释义上方的词性标签一键切换：只看名词 / 动词 / 形容词的义项</div>
        <div><i>7</i>顶栏「📊 统计」看每天的复习量、记忆保持率和下次复习排期</div>
-       <div><i>7</i>词卡里的「易混词」列出形近 / 音近的词，点「辨析」并排对比、还能做小测（快捷键 C）</div>
+       <div><i>8</i>词卡里的「易混词」列出形近 / 音近的词，点「辨析」并排对比、还能做小测（快捷键 C）</div>
      </div>` +
     `<div class="hsec">图例</div>` +
     `<div class="li">
@@ -3834,7 +3762,7 @@ document.addEventListener("keydown", e => {
 
 window.addEventListener("resize", () => {
   if (sim) { sim.force("center", d3.forceCenter(width() / 2, height() / 2)); sim.alpha(0.3).restart(); }
-  paintGrid(); paint(); drawMini(true);
+  paintGrid(); paint();
 });
 
 /* ---------- boot ----------

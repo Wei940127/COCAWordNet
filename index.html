@@ -65,7 +65,7 @@
   </div>
 
   <div class="stats" id="stats"></div>
-  <button id="verPill" class="verpill" title="当前版本 · 点一下检查更新">v37</button>
+  <button id="verPill" class="verpill" title="当前版本 · 点一下检查更新">v38</button>
 </header>
 
 <main>
@@ -83,17 +83,13 @@
       </filter>
     </defs></svg>
     <div id="legend" class="legend lgbox"></div>
-    <!-- 小地图：全局节点缩略图 + 当前视口框，点击/拖拽快速定位；⤾ 复位视图 -->
-    <div id="mini" class="mini hidden">
-      <canvas id="miniCv" width="150" height="104"></canvas>
-      <button id="miniReset" class="minibtn" title="复位视图：缩放/平移归零（快捷键 Z）" aria-label="复位视图">⤾</button>
-    </div>
     <!-- 视角：0° = 平面俯视，越大越立体 -->
     <div class="tiltbox">
       <span class="tlabel">视角</span>
       <input id="tilt" type="range" min="0" max="75" step="1" value="55" title="拖动旋转观察角度：0° 为平面俯视，越大越立体">
       <span id="tiltVal" class="tval">55°</span>
       <button id="tiltToggle" class="tbtn" title="在「平面视图」和「立体视图」之间切换（快捷键 V）">立体</button>
+      <button id="viewReset" class="tbtn" title="复位视图：缩放/平移归零，布局不动（快捷键 Z）" aria-label="复位视图">⤾</button>
     </div>
     <div id="tooltip" class="tooltip hidden"></div>
     <!-- 复习暂停提示：在词网里也能一键回复习 -->
