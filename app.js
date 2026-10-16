@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v48";
+const APP_VERSION = "v49";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -54,22 +54,33 @@ if (!D.extra) D.extra = [];
 if (!D.extraPhon) D.extraPhon = [];
 if (!D.extraTrans) D.extraTrans = [];
 if (!window.APP_EX) window.APP_EX = {};
-/* 段落记忆（data_net_bNN.js）：词头 → {tw:[[关系词,关系类型],…], en, zh}
-   和例句一样是「有就显示、没有就隐藏」的增强内容，载入失败一律静默。 */
-if (!window.APP_NET) window.APP_NET = {};
-const netLoaded = new Set();     /* 已载入的段落块 */
-const netMissing = new Set();    /* 确认没有段落数据的块（不再重试） */
-let hasNet = false;              /* 任何一块载入过 */
+/* 段落记忆（data_net_bNNa..d.js）：词头 → {tw:[[关系词,关系类型],…], en, zh}
+   和例句一样是「有就显示、没有就隐藏」的增强内容，载入失败一律静默。
 
-/* 段落块 → 脚本名，规则与词层块一致。
-   不写「哪些块已生成」的白名单是**故意**的：现在只生成到 b03，将来一块块补齐时
-   新文件放进去就自动生效，不用回头改代码。代价是看第 4 层以后的词会白请求一次
-   data_net_bNN.js（404），第一次失败后 netMissing 就记住，同一块不会重复请求。 */
-const netFile = c => "data_net_b" + (c < 10 ? "0" + c : c) + ".js";
-function needNet(c) {
-  if (netLoaded.has(c) || netMissing.has(c)) return Promise.resolve();
-  return loadPart(netFile(c), "net" + c, () => netLoaded.has(c))
-    .catch(() => { netMissing.add(c); });
+   分块分两级：先按词层（每 1000 词一块，规则与词层块一致），块内再按全局下标
+   切 NET_SUB=250 词一个子块（后缀 a/b/c/d）。原因是段落正文很长——一层写满有
+   500KB+（b1 层 529 段 = 538KB），整块拉会白等；按当前词只取所在子块，流量降到 1/4。 */
+if (!window.APP_NET) window.APP_NET = {};
+const NET_SUB = 250;             /* 每个段落子块覆盖的全局下标跨度 */
+const netLoaded = new Set();     /* 已载入的段落子块，键形如 "3c" */
+const netMissing = new Set();    /* 确认没有段落数据的子块（不再重试） */
+let hasNet = false;              /* 任何一个子块载入过 */
+
+/* 段落子块 → 脚本名。
+   不写「哪些块已生成」的白名单是**故意**的：将来一块块补齐时新文件放进去就自动
+   生效，不用回头改代码。代价是没生成的子块会白请求一次（404），第一次失败后
+   netMissing 就记住，同一子块不会重复请求。 */
+const netSubOf = i => Math.floor((i % 1000) / NET_SUB);       /* 0..3 */
+const netKey = i => chunkOf(i) + "abcd".charAt(netSubOf(i));
+const netFile = i => {
+  const c = chunkOf(i);
+  return "data_net_b" + (c < 10 ? "0" + c : c) + "abcd".charAt(netSubOf(i)) + ".js";
+};
+function needNet(i) {
+  const k = netKey(i);
+  if (netLoaded.has(k) || netMissing.has(k)) return Promise.resolve();
+  return loadPart(netFile(i), "net" + k, () => netLoaded.has(k))
+    .catch(() => { netMissing.add(k); });
 }
 
 /* 易混词的缓存：每合并进一个词层块就作废重算（新载入的词会带来新的邻居） */
@@ -139,13 +150,14 @@ window.APP_MERGE_ZH = function (o) {
   afterPartLoad();
 };
 
-/* 段落记忆分块：和词层块一样由脚本自己调进来 */
+/* 段落记忆子块：和词层块一样由脚本自己调进来（payload 带 sub 说明是哪个子块） */
 window.APP_MERGE_NET = function (c, o) {
   const src = (o && o.par) || {};
   const dst = window.APP_NET || (window.APP_NET = {});
   for (const w in src) dst[w] = src[w];
-  netMissing.delete(c);
-  netLoaded.add(c);
+  const k = c + (o && o.sub ? o.sub : "");
+  netMissing.delete(k);
+  netLoaded.add(k);
   hasNet = true;
   afterPartLoad();
 };
@@ -253,7 +265,10 @@ window.COCA_PARA = {
     word: pq.word, blanks: pq.blanks.length, order: pq.order.slice(),
     answers: pq.blanks.map(b => b.w), fill: pq.fill.slice(), graded: pq.graded, revealed: pq.revealed
   } : null),
-  parts: () => ({ loaded: [...netLoaded], missing: [...netMissing] })
+  parts: () => ({ loaded: [...netLoaded], missing: [...netMissing] }),
+  /* 子块定位：词 → 键（"3c"）/ 文件名（data_net_b03c.js），供测试断言「只取了一个子块」 */
+  sub: w => { const i = D.idx[String(w).toLowerCase()]; return i === undefined ? null : netKey(i); },
+  subFile: w => { const i = D.idx[String(w).toLowerCase()]; return i === undefined ? null : netFile(i); }
 };
 window.COCA_CONF = {
   of: w => { const i = typeof w === "number" ? w : D.idx[String(w).toLowerCase()]; return i === undefined ? null : confusableOf(i); },
@@ -1914,9 +1929,9 @@ function renderPara(i) {
     blk.style.display = "none";
     $("dPara").innerHTML = "";
     $("dParaNote").textContent = "";
-    const c = chunkOf(i);
-    if (!netLoaded.has(c) && !netMissing.has(c)) {
-      needNet(c).then(() => { if (paraWant === i) renderPara(i); });
+    const k = netKey(i);
+    if (!netLoaded.has(k) && !netMissing.has(k)) {
+      needNet(i).then(() => { if (paraWant === i) renderPara(i); });
     }
     return;
   }

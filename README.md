@@ -163,7 +163,7 @@ CWN1.hs18b.3.22-2-0.7-1-0.1h4-1-0
 ## 🛠 技术说明
 
 - 纯静态单页应用：`index.html + app.js + style.css + data_core.js + data_b*.js + data_net_b*.js + d3.min.js`（图标 `favicon.ico` / `icon.png`），零依赖、零构建
-- 词库被拆成「骨架 + 分块」，按需载入：`data_core.js`（约 200KB gzip，词表 / 词层 / 下标 / 别名，随首屏一起加载），`data_b01.js`～`data_b10.js`（每块 1000 词的释义 / 音标 / 关系边 / 构词 / 搭配 / 例句），`data_net_b01.js`～`data_net_b03.js`（段落记忆：b01 是 529 词，b02/b03 是样板；按需载入，不进首屏预缓存），`data_extra.js` + `data_extra_def.js`（词表外词及其释义），`data_zh.js`（中文释义搜索索引，约 219KB gzip，第一次输入中文时才载入）。首屏因此只需 ~350KB gzip，其余在后台预热或点到时再取
+- 词库被拆成「骨架 + 分块」，按需载入：`data_core.js`（约 200KB gzip，词表 / 词层 / 下标 / 别名，随首屏一起加载），`data_b01.js`～`data_b10.js`（每块 1000 词的释义 / 音标 / 关系边 / 构词 / 搭配 / 例句），`data_net_bNNa.js`～`data_net_bNNd.js`（段落记忆：按「词层 + 每 250 词一个子块」命名，一层最多 4 个子块；b01 是 529 词，b02/b03 是样板。打开某个词时**只取它所在的那一个子块**（约 55–68KB gzip，不是整层 231KB），不进首屏预缓存），`data_extra.js` + `data_extra_def.js`（词表外词及其释义），`data_zh.js`（中文释义搜索索引，约 219KB gzip，第一次输入中文时才载入）。首屏因此只需 ~350KB gzip，其余在后台预热或点到时再取
 - 离线 / 可安装：`sw.js`（Service Worker）预缓存应用外壳与数据骨架，各分块首次用到时再缓存，`manifest.webmanifest` + `apple-touch-icon.png` 提供「添加到主屏幕」能力（PWA）
 - 学习状态（掌握度）存于 localStorage，不上传任何数据
 - 建议使用 Chrome / Edge / Firefox 现代浏览器；iPad 上请用 Safari 添加到主屏幕
