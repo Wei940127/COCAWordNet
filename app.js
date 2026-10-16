@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v43";
+const APP_VERSION = "v44";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -54,6 +54,23 @@ if (!D.extra) D.extra = [];
 if (!D.extraPhon) D.extraPhon = [];
 if (!D.extraTrans) D.extraTrans = [];
 if (!window.APP_EX) window.APP_EX = {};
+/* 段落记忆（data_net_bNN.js）：词头 → {tw:[[关系词,关系类型],…], en, zh}
+   和例句一样是「有就显示、没有就隐藏」的增强内容，载入失败一律静默。 */
+if (!window.APP_NET) window.APP_NET = {};
+const netLoaded = new Set();     /* 已载入的段落块 */
+const netMissing = new Set();    /* 确认没有段落数据的块（不再重试） */
+let hasNet = false;              /* 任何一块载入过 */
+
+/* 段落块 → 脚本名，规则与词层块一致。
+   不写「哪些块已生成」的白名单是**故意**的：现在只生成到 b03，将来一块块补齐时
+   新文件放进去就自动生效，不用回头改代码。代价是看第 4 层以后的词会白请求一次
+   data_net_bNN.js（404），第一次失败后 netMissing 就记住，同一块不会重复请求。 */
+const netFile = c => "data_net_b" + (c < 10 ? "0" + c : c) + ".js";
+function needNet(c) {
+  if (netLoaded.has(c) || netMissing.has(c)) return Promise.resolve();
+  return loadPart(netFile(c), "net" + c, () => netLoaded.has(c))
+    .catch(() => { netMissing.add(c); });
+}
 
 /* 易混词的缓存：每合并进一个词层块就作废重算（新载入的词会带来新的邻居） */
 let confVer = 0;
@@ -72,6 +89,7 @@ function afterPartLoad() {
     if (typeof renderStat === "function" && !$("statModal").classList.contains("hidden")) renderStat();
     if (hasExtraDef && typeof refreshExtInfo === "function") refreshExtInfo();
     if (typeof fillPanelIfPending === "function") fillPanelIfPending();
+    if (typeof refillPara === "function") refillPara();
     if (typeof renderRoot === "function" && !$("rootModal").classList.contains("hidden")) renderRoot();
   } catch (e) {}
 }
@@ -118,6 +136,17 @@ window.APP_MERGE_ZH = function (o) {
   D.zh = o && o.zh ? o.zh : "";
   zhParts = null;                   /* 惰性切分：第一次用中文搜索时才 split */
   hasZh = true;
+  afterPartLoad();
+};
+
+/* 段落记忆分块：和词层块一样由脚本自己调进来 */
+window.APP_MERGE_NET = function (c, o) {
+  const src = (o && o.par) || {};
+  const dst = window.APP_NET || (window.APP_NET = {});
+  for (const w in src) dst[w] = src[w];
+  netMissing.delete(c);
+  netLoaded.add(c);
+  hasNet = true;
   afterPartLoad();
 };
 
@@ -206,6 +235,26 @@ window.COCA_DATA = {
   resetView: () => resetView()
 };
 /* 易混词引擎（放在后面定义，这里先挂个转发壳，方便测试/排查直接调用） */
+window.COCA_PARA = {
+  has: w => !!paraOf(String(w).toLowerCase()),
+  item: w => paraOf(String(w).toLowerCase()),
+  forms: paraForms,
+  sents: paraSents,
+  play: () => paraReadAll(),
+  playing: () => paraPlaying,
+  open: () => openParaCloze(),
+  close: closeParaCloze,
+  fill: w => fillCloze(w),
+  clear: k => clearCloze(k),
+  check: () => checkCloze(),
+  reveal: () => revealCloze(),
+  rebuild: () => { if (pq) buildCloze(pq.i, pq.word, pq.item); },
+  state: () => (pq ? {
+    word: pq.word, blanks: pq.blanks.length, order: pq.order.slice(),
+    answers: pq.blanks.map(b => b.w), fill: pq.fill.slice(), graded: pq.graded, revealed: pq.revealed
+  } : null),
+  parts: () => ({ loaded: [...netLoaded], missing: [...netMissing] })
+};
 window.COCA_CONF = {
   of: w => { const i = typeof w === "number" ? w : D.idx[String(w).toLowerCase()]; return i === undefined ? null : confusableOf(i); },
   items: w => { const i = typeof w === "number" ? w : D.idx[String(w).toLowerCase()]; return i === undefined ? null : confItems(i, 8, 4).map(x => ({ w: D.words[x.j], tag: confTagOf(x.o) })); },
@@ -1341,7 +1390,7 @@ function probeDict(words) {
 }
 
 /* btn: 可选，点击的那个小按钮（搭配/关联词），一起显示播放态 */
-function speak(word, btnEl) {
+function speak(word, btnEl, onDone) {
   if (!word) return;
   const btn = $("dSpeak");
   btn.classList.add("playing");
@@ -1352,6 +1401,8 @@ function speak(word, btnEl) {
     over = true;
     btn.classList.remove("playing");
     if (btnEl) btnEl.classList.remove("playing");
+    /* 通读全段靠这个回调一句接一句（本地兜底那条路不会调它） */
+    if (onDone) { try { onDone(); } catch (e) {} }
   };
 
   if (curAudio) { try { curAudio.pause(); } catch (e) {} curAudio = null; }
@@ -1700,6 +1751,9 @@ function renderExtraPanel(node) {
   $("bMorph").style.display = "none";
   $("bColl").style.display = "none";
   $("bConf").style.display = "none";
+  $("bPara").style.display = "none";
+  stopParaRead();
+  paraWant = null;
   $("dConf").innerHTML = "";
   $("dFamNote").textContent = "";
   $("dFam").innerHTML = "<span class='muted'>词表外词汇，无词族数据</span>";
@@ -1763,6 +1817,268 @@ function exFormsOf(i) {
   (D.fam[i] || []).forEach(p => set.add(String(p[0])));
   return Array.from(set);
 }
+
+/* ---------- 段落记忆：把词网里的关系词编进同一段 ----------
+   词根索引解决「一串同根词」，这里解决「一个词网一段话」。
+   段落是离线预生成的（_net_gen 流水线），随词层分块载入 data_net_bNN.js：
+   一个词头 → 一段 90–170 词的连贯情景文，里面用到了它词网里的每个目标词。
+   读出「这些词本来活在同一个语境里」，比一个个背释义强。 */
+
+const reEsc = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/* 目标词在段落里是带变形出现的（shout → shouts / shouted / shouting），
+   规则沿用例句那套，另外补上不规则动词 —— 漏了会误判成「没写进去」。 */
+const PARA_IRREG = {
+  lie: ["lying", "lay", "lain"], stick: ["stuck"], draw: ["drew", "drawn"], tear: ["tore", "torn"],
+  ride: ["rode", "ridden"], rise: ["rose", "risen"], run: ["ran"], hold: ["held"],
+  begin: ["began", "begun"], break: ["broke", "broken"], find: ["found"], feel: ["felt"],
+  grow: ["grew", "grown"], meet: ["met"], lead: ["led"], leave: ["left"], lose: ["lost"],
+  pay: ["paid"], spend: ["spent"], bring: ["brought"], catch: ["caught"], think: ["thought"],
+  say: ["said"], see: ["saw", "seen"], give: ["gave", "given"], take: ["took", "taken"],
+  eat: ["ate", "eaten"], sing: ["sang", "sung"], speak: ["spoke", "spoken"], shine: ["shone"],
+  fall: ["fell", "fallen"], freeze: ["froze", "frozen"], beat: ["beaten"], make: ["made"],
+  keep: ["kept"], sell: ["sold"], tell: ["told"], hear: ["heard"], buy: ["bought"]
+};
+function paraForms(w) {
+  const s = new Set([w]);
+  const add = x => { if (x.length > 1) s.add(x); };
+  ["s", "es", "ed", "d", "ing", "er", "est", "ly", "ion", "ment", "ness", "ers", "ings"].forEach(suf => add(w + suf));
+  if (/e$/.test(w)) { const b = w.slice(0, -1); ["ing", "ed", "es", "er", "est"].forEach(suf => add(b + suf)); }
+  if (/[^aeiou][aeiou][^aeiouwxy]$/.test(w)) {
+    const d = w + w.slice(-1);
+    ["ed", "ing", "er", "est"].forEach(suf => add(d + suf));
+  }
+  if (/y$/.test(w)) { const b = w.slice(0, -1); add(b + "ies"); add(b + "ied"); }
+  (PARA_IRREG[w] || []).forEach(add);
+  return [...s];
+}
+
+/* 匹配计划：变形 → {词, 关系类型}。
+   目标词必须排在词头前面注册 —— 否则词头的变形会把派生目标词吃掉
+   （join 的 -er 变形 = joiner、receive 的 -r = receiver、deposit 的 -ion = deposition）。 */
+function paraPlan(word, tw) {
+  const map = new Map();
+  (tw || []).map(([w, t]) => ({ w, t }))
+    .concat([{ w: word, t: -1 }])
+    .forEach(m => paraForms(m.w).forEach(v => { if (!map.has(v)) map.set(v, m); }));
+  const keys = [...map.keys()].sort((a, b) => b.length - a.length).map(reEsc);
+  return { map, re: new RegExp("\\b(" + keys.join("|") + ")\\b", "gi") };
+}
+/* 段落高亮：目标词按关系类型着色（色值同图例），词头另给一个底色 */
+function paraHTML(word, en, tw) {
+  const safe = escHTML(en);
+  if (!tw || !tw.length) return safe;
+  const p = paraPlan(word, tw);
+  try {
+    return safe.replace(p.re, m => {
+      const o = p.map.get(String(m).toLowerCase());
+      if (!o) return m;
+      return '<b class="pw pt' + o.t + '" data-w="' + escHTML(o.w) + '" role="button" tabindex="0">' + m + "</b>";
+    });
+  } catch (e) { return safe; }
+}
+/* 分句：不用 lookbehind（老 Safari 不支持），按词尾标点切 */
+function paraSents(en) {
+  const out = [];
+  let buf = "";
+  String(en || "").split(/\s+/).forEach(w => {
+    buf = buf ? buf + " " + w : w;
+    if (/[.!?]$/.test(w)) { out.push(buf); buf = ""; }
+  });
+  if (buf) out.push(buf);
+  return out;
+}
+const paraOf = w => (window.APP_NET && window.APP_NET[w]) || null;
+
+/* 载入补齐后回调：当前词的面板重画一次（段落是「有则显示」的，晚到不能丢） */
+let paraWant = null;
+function refillPara() { if (paraWant !== null && paraWant === current) renderPara(paraWant); }
+
+function renderPara(i) {
+  const blk = $("bPara");
+  if (!blk) return;
+  paraWant = i;
+  stopParaRead();                       /* 换词就停掉上一段的连读 */
+  const word = D.words[i], item = paraOf(word);
+  if (!item) {
+    blk.style.display = "none";
+    $("dPara").innerHTML = "";
+    $("dParaNote").textContent = "";
+    const c = chunkOf(i);
+    if (!netLoaded.has(c) && !netMissing.has(c)) {
+      needNet(c).then(() => { if (paraWant === i) renderPara(i); });
+    }
+    return;
+  }
+  blk.style.display = "";
+  const tw = item.tw || [];
+  $("dParaNote").textContent = "覆盖 " + (tw.length + 1) + " 个词 · 点句子朗读 · 点彩色词跳词网";
+  const html = paraSents(item.en)
+    .map(s => '<span class="psent" data-s="' + escHTML(s) + '" role="button" tabindex="0">' +
+      paraHTML(word, s, tw) + "</span>")
+    .join(" ");
+  $("dPara").innerHTML = '<p class="pen">' + html + "</p>" +
+    '<p class="pzh">' + escHTML(item.zh || "") + "</p>";
+  $("dPara").querySelectorAll(".psent").forEach(el => {
+    el.onclick = () => speak(el.dataset.s, el);
+  });
+  $("dPara").querySelectorAll(".pw").forEach(el => {
+    el.onclick = ev => { ev.stopPropagation(); go(el.dataset.w); speak(el.dataset.w); };
+  });
+}
+
+/* 通读全段：一句接一句（speak 的第三个参数就是「读完了」的回调）。
+   离线时没有回调可等，退化成按词数估时长。 */
+let paraPlaying = false, paraTimer = 0;
+function stopParaRead() {
+  paraPlaying = false;
+  clearTimeout(paraTimer);
+  if (curAudio) { try { curAudio.pause(); } catch (e) {} curAudio = null; }
+  const btn = $("dParaPlay");
+  if (btn) { btn.classList.remove("on"); btn.textContent = "▶ 通读全段"; }
+}
+function paraReadAll() {
+  const i = current;
+  if (i === null) return;
+  const item = paraOf(D.words[i]);
+  if (!item) return;
+  if (paraPlaying) { stopParaRead(); return; }
+  const btn = $("dParaPlay");
+  const sents = paraSents(item.en);
+  const online = navigator.onLine !== false;
+  let k = 0;
+  paraPlaying = true;
+  if (btn) { btn.classList.add("on"); btn.textContent = "■ 停止朗读"; }
+  const step = () => {
+    if (!paraPlaying || current !== i) { stopParaRead(); return; }
+    if (k >= sents.length) { stopParaRead(); return; }
+    const s = sents[k++];
+    if (online) speak(s, null, () => { paraTimer = setTimeout(step, 220); });
+    else { speakLocal(s); paraTimer = setTimeout(step, 600 + s.split(/\s+/).length * 330); }
+  };
+  step();
+}
+
+/* ---------- 段落挖空：把目标词挖掉，用词池回填 ----------
+   读一遍是输入，填一遍才是输出 —— 段落真正值钱的用法在这里。
+   成绩写回**词头**那条 SRS 记录（和复习卡、词根串记同一条）。 */
+let pq = null;
+function shuffle(arr) {
+  const a = arr.slice();
+  for (let k = a.length - 1; k > 0; k--) {
+    const j = Math.floor(Math.random() * (k + 1));
+    const t = a[k]; a[k] = a[j]; a[j] = t;
+  }
+  return a;
+}
+function buildCloze(i, word, item) {
+  const tw = item.tw || [];
+  const p = paraPlan(word, tw);
+  const blanks = [], segs = [], seen = new Set();
+  let last = 0, m;
+  p.re.lastIndex = 0;
+  while ((m = p.re.exec(item.en))) {
+    const o = p.map.get(String(m[0]).toLowerCase());
+    if (!o || o.t === -1) continue;           /* 词头不挖：它是这一段的锚 */
+    if (seen.has(o.w)) continue;              /* 一个词只挖第一次出现 */
+    seen.add(o.w);
+    if (m.index > last) segs.push({ t: "x", v: item.en.slice(last, m.index) });
+    segs.push({ t: "b", k: blanks.length });
+    blanks.push({ w: o.w, rt: o.t });
+    last = m.index + m[0].length;
+  }
+  segs.push({ t: "x", v: item.en.slice(last) });
+  pq = {
+    i, word, item, segs, blanks,
+    fill: new Array(blanks.length).fill(null),
+    used: new Set(),
+    order: shuffle(blanks.map((b, k) => k)),
+    graded: false, revealed: false
+  };
+  $("paraSub").textContent = word + " · " + blanks.length + " 空";
+  $("paraHint").textContent = "点词池里的词填进空格 · 点已填的空格取回";
+  $("paraHint").className = "";
+  renderCloze();
+}
+function renderCloze() {
+  if (!pq) return;
+  const body = [];
+  pq.segs.forEach(s => {
+    if (s.t === "x") { body.push(escHTML(s.v)); return; }
+    const b = pq.blanks[s.k], f = pq.fill[s.k];
+    const bad = pq.graded && f !== b.w;
+    const cls = "pbl" + (f ? " on" : "") + (pq.graded ? (bad ? " bad" : " ok") : "");
+    const inner = f ? escHTML(f) : "&nbsp;";
+    body.push('<button class="' + cls + '" data-k="' + s.k + '" type="button">' + inner +
+      (bad ? '<i class="pans">' + escHTML(b.w) + "</i>" : "") + "</button>");
+  });
+  const chips = pq.order.map(k => {
+    const b = pq.blanks[k], used = pq.used.has(b.w);
+    return '<button class="pchip' + (used ? " used" : "") + '" data-w="' + escHTML(b.w) +
+      '" type="button"' + (used ? " disabled" : "") + ">" + escHTML(b.w) + "</button>";
+  }).join("");
+  $("paraBody").innerHTML =
+    '<p class="pen">' + body.join("") + "</p>" +
+    '<div class="pbank"><span class="pbankt">词池</span>' + chips + "</div>";
+  const doneAll = pq.fill.every(x => x);
+  $("paraCheck").classList.toggle("hidden", pq.graded || !doneAll);
+  $("paraReveal").classList.toggle("hidden", pq.revealed);
+  $("paraAgain").classList.toggle("hidden", !pq.graded && !pq.revealed);
+}
+function fillCloze(w) {
+  if (!pq || pq.graded || pq.revealed || pq.used.has(w)) return;
+  const k = pq.fill.indexOf(null);
+  if (k < 0) return;
+  pq.fill[k] = w;
+  pq.used.add(w);
+  renderCloze();
+}
+function clearCloze(k) {
+  if (!pq || pq.graded || pq.revealed) return;
+  const w = pq.fill[k];
+  if (!w) return;
+  pq.fill[k] = null;
+  pq.used.delete(w);
+  renderCloze();
+}
+function checkCloze() {
+  if (!pq || pq.graded) return;
+  pq.graded = true;
+  renderCloze();
+  const n = pq.blanks.length;
+  const right = pq.blanks.filter((b, k) => pq.fill[k] === b.w).length;
+  const q = right === n ? 2 : (n - right <= 2 ? 1 : 0);
+  const r = applyGrade(pq.i, q);
+  /* 成绩说清楚：填对几空 + 换算成哪一档 + 下次什么时候再来（s=0 时没有排期，就别说） */
+  const bits = ["填对 " + right + "/" + n, "算作「" + ["忘了", "有印象", "记得"][q] + "」"];
+  const dtx = dueText(pq.i);
+  if (dtx) bits.push(dtx);
+  if (r.nowS !== r.prevS) {
+    bits.push("掌握度 " + ["未学", "学习中", "已掌握"][r.prevS] + " → " + ["未学", "学习中", "已掌握"][r.nowS]);
+  }
+  $("paraHint").className = "pgot";
+  $("paraHint").textContent = bits.join(" · ");
+  renderStats();
+  updateRvBadge();
+  if (!$("detail").classList.contains("hidden")) renderPanel(pq.i);
+}
+function revealCloze() {
+  if (!pq || pq.graded) return;
+  pq.blanks.forEach((b, k) => { pq.fill[k] = b.w; pq.used.add(b.w); });
+  pq.revealed = true;
+  renderCloze();
+  $("paraHint").className = "";
+  $("paraHint").textContent = "这是答案 · 不算成绩，看一遍再点「再来一次」";
+}
+function openParaCloze() {
+  const i = current;
+  if (i === null) return;
+  const word = D.words[i], item = paraOf(word);
+  if (!item) return;
+  buildCloze(i, word, item);
+  $("paraModal").classList.remove("hidden");
+}
+function closeParaCloze() { $("paraModal").classList.add("hidden"); pq = null; }
 
 /* ---------- 易混词：近形 / 近音 ----------
    完全由词表 + 音标算出，不依赖任何外部数据：
@@ -2171,6 +2487,9 @@ function renderPanel(i, extraNode) {
       if ($("dExNote")) $("dExNote").textContent = "";
     }
   }
+
+  /* 段落记忆：把词网里的关系词编进同一段（没有该词的段落时整块收起） */
+  renderPara(i);
 
   /* 中文/英文释义 + 词性导航 tab（每次换词重置回「全部」） */
   posFilter = "";
@@ -2619,6 +2938,7 @@ function renderStats() {
        <div><i>7</i>顶栏「📊 统计」看每天的复习量、记忆保持率和下次复习排期</div>
        <div><i>8</i>词卡里的「易混词」列出形近 / 音近的词，点「辨析」并排对比、还能做小测（快捷键 C）</div>
        <div><i>9</i>词卡里的「词根拆解」每一段都能点：一个词根串起一串同根词（-spect- → expect / inspect / respect），这是把散词连成串最快的一条路（快捷键 I）。在词根索引页点「🧭 开始串记」还能把 411 组词根当学习路径一组组过，评过的词写进和复习卡同一条记录</div>
+       <div><i>10</i>词卡里的「段落记忆」把这个词网编成一段小情景文：带色的就是它的关系词，点句子朗读、点彩色词跳回词网，点「挖空练习」用词池把挖掉的词填回去（快捷键 T）。读完一段，这些词就活在同一个语境里了</div>
      </div>` +
     `<div class="hsec">图例</div>` +
     `<div class="li">
@@ -2643,7 +2963,7 @@ function renderStats() {
        <span><b>R</b>复习</span><span><b>N</b>下一个词</span><span><b>G</b>路径查找</span>
        <span><b>M</b>进度地图</span><span><b>L</b>单词列表</span><span><b>V</b>立体/平面</span>
        <span><b>P</b>发音</span><span><b>H</b>本说明</span><span><b>K</b>难词清单</span>
-       <span><b>S</b>学习统计</span><span><b>C</b>易混词辨析</span><span><b>I</b>词根索引</span>
+       <span><b>S</b>学习统计</span><span><b>C</b>易混词辨析</span><span><b>I</b>词根索引</span><span><b>T</b>段落挖空</span>
        <span><b>Z</b>复位视图</span><span><b>1–7</b>关系过滤</span><span><b>0</b>全部显示</span>
      </div>` +
     `</div>`;
@@ -4360,9 +4680,28 @@ $("bandSel").onchange = () => {
 
 document.querySelectorAll(".quick button").forEach(b => b.onclick = () => go(b.dataset.w));
 
+/* ---------- 段落记忆事件 ---------- */
+$("dParaPlay").onclick = paraReadAll;
+$("dParaCloze").onclick = openParaCloze;
+$("paraClose").onclick = closeParaCloze;
+$("paraCheck").onclick = checkCloze;
+$("paraReveal").onclick = revealCloze;
+$("paraAgain").onclick = () => { if (pq) buildCloze(pq.i, pq.word, pq.item); };
+$("paraBody").onclick = ev => {
+  const chip = ev.target.closest(".pchip");
+  if (chip) { fillCloze(chip.dataset.w); return; }
+  const bl = ev.target.closest(".pbl");
+  if (bl) clearCloze(+bl.dataset.k);
+};
+
 document.addEventListener("keydown", e => {
   if (!$("reviewModal").classList.contains("hidden")) return;   /* 复习界面自己有键盘操作 */
   if (!$("rsModal").classList.contains("hidden")) return;       /* 串记界面同理（←/→ 切组） */
+  if (!$("paraModal").classList.contains("hidden")) {           /* 段落挖空就开着的时候只认 Esc/T */
+    if (e.key === "Escape") closeParaCloze();
+    else if (e.key === "t" || e.key === "T") closeParaCloze();
+    return;
+  }
   if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
   if (e.key === "r" || e.key === "R") { if (rvPaused) resumeReview(); else startReview(); return; }
   if (e.key === "n" || e.key === "N") nextWord();
@@ -4395,6 +4734,8 @@ document.addEventListener("keydown", e => {
   if (e.key === "c" || e.key === "C") {
     if ($("confModal").classList.contains("hidden")) openConfuseCurrent(); else closeConfuse();
   }
+  /* 段落挖空：T 开关（当前词的词网段落） */
+  if (e.key === "t" || e.key === "T") { if (paraOf(D.words[current])) openParaCloze(); }
   /* 关系类型开关：1–7 依次对应图例里的七种关系，0 = 全部显示 */
   if (/^[1-7]$/.test(e.key)) { toggleRelType(+e.key - 1); e.preventDefault(); }
   if (e.key === "0") { clearRelFilter(); e.preventDefault(); }

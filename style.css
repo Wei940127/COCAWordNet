@@ -1107,3 +1107,61 @@ main { padding-bottom: env(safe-area-inset-bottom); }
 .cqfeed .cqph { color: #64748b; }
 .cqfeed .cqzh { color: #475569; }
 
+
+/* ---------- 段落记忆（v44）：一个词网编成一段话，读一遍 + 挖空回填 ----------
+   目标词的着色沿用图例里的关系配色，只是换成可读性更好的深色版。 */
+.para .pen { margin: 0; font-size: 13.5px; line-height: 1.95; color: #1e293b; }
+.para .psent { cursor: pointer; border-radius: 4px; }
+.para .psent:hover { background: #f1f5f9; }
+.para .psent:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
+.para .pw {
+  font-weight: 600; color: #475569; cursor: pointer;
+  border-bottom: 2px solid currentColor; padding-bottom: 1px;
+  border-radius: 3px 3px 0 0;
+}
+.para .pw:hover { background: #eef2ff; }
+.para .pt-1 { color: #1d4ed8; background: var(--accent-soft); border-bottom-color: var(--accent); padding: 0 2px; }
+.para .pt0 { color: #d4537e; }
+.para .pt1 { color: #e24b4a; }
+.para .pt2 { color: #7c3aed; }
+.para .pt3 { color: #0284c7; }
+.para .pt4 { color: #b45309; }
+.para .pt5 { color: #db7fae; }
+.para .pt6 { color: #64748b; }
+.para .pzh {
+  margin: 10px 0 0; padding-left: 10px; font-size: 12.5px; line-height: 1.8;
+  color: var(--muted); border-left: 2px solid var(--border);
+}
+.parafoot { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+
+/* ---------- 挖空练习 ---------- */
+.pbody { padding: 4px 2px 2px; }
+.pbody .pen { margin: 0; font-size: 14.5px; line-height: 2.3; color: #1e293b; }
+.pbl {
+  font: inherit; font-weight: 600; font-size: 13.5px; min-width: 62px;
+  padding: 1px 9px; margin: 0 1px; cursor: pointer;
+  color: #1d4ed8; background: var(--accent-soft);
+  border: none; border-bottom: 2px solid var(--accent); border-radius: 5px 5px 0 0;
+}
+.pbl:hover { background: #dbeafe; }
+.pbl.ok { color: #15803d; background: #f0fdf4; border-bottom-color: #86efac; }
+.pbl.bad { color: #b91c1c; background: #fef2f2; border-bottom-color: #fca5a5; }
+.pbl .pans { font-style: normal; font-weight: 600; color: #15803d; margin-left: 7px; }
+.pbl .pans::before { content: "→ "; color: #94a3b8; font-weight: 400; }
+.pbank {
+  margin-top: 16px; padding-top: 12px; border-top: 1px dashed var(--border);
+  display: flex; flex-wrap: wrap; gap: 7px; align-items: center;
+}
+.pbankt { font-size: 12px; color: var(--muted); margin-right: 2px; }
+.pchip {
+  font: inherit; font-size: 13px; padding: 4px 11px; border-radius: 20px;
+  border: 1px solid var(--border); background: #f8fafc; color: var(--text); cursor: pointer;
+}
+.pchip:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.pchip.used { opacity: .3; cursor: default; text-decoration: line-through; }
+.pfoot {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border);
+  font-size: 12.5px; color: var(--muted);
+}
+.pfoot .pgot { color: var(--accent); font-weight: 600; }

@@ -66,7 +66,7 @@
   </div>
 
   <div class="stats" id="stats"></div>
-  <button id="verPill" class="verpill" title="当前版本 · 点一下检查更新">v43</button>
+  <button id="verPill" class="verpill" title="当前版本 · 点一下检查更新">v44</button>
 </header>
 
 <main>
@@ -152,6 +152,16 @@
       <div class="block" id="bEx" style="display:none">
         <h3>例句 <small id="dExNote"></small></h3>
         <div id="dEx" class="exlist"></div>
+      </div>
+
+      <!-- 段落记忆：把词网里的关系词编进同一段，读一遍 → 挖空回填 -->
+      <div class="block" id="bPara" style="display:none">
+        <h3>段落记忆 <small id="dParaNote"></small></h3>
+        <div id="dPara" class="para"></div>
+        <div class="parafoot">
+          <button id="dParaPlay" class="btn mini" type="button" title="逐句连读，点一下开始，再点一下停止">▶ 通读全段</button>
+          <button id="dParaCloze" class="btn mini primary" type="button" title="把段落里的目标词挖空，用词池回填（快捷键 T）">✎ 挖空练习 ▸</button>
+        </div>
       </div>
 
       <div class="block" id="bDef" style="display:none">
@@ -312,6 +322,24 @@
       <span>数据只存在本机 · 逐日记录从 v34 起，更早的复习量按当天复习过的词数估算</span>
       <span class="mio">
         <button id="statMapLink" class="btn mini" title="按词层查看学习进度（快捷键 M）">▦ 进度地图</button>
+      </span>
+    </div>
+  </div>
+</div>
+
+<div id="paraModal" class="modal hidden">
+  <div class="modalCard wide">
+    <div class="mhead">
+      <b>段落挖空 <small id="paraSub"></small></b>
+      <button id="paraClose" class="mclose" title="关闭（Esc）">✕</button>
+    </div>
+    <div id="paraBody" class="pbody"></div>
+    <div class="pfoot">
+      <span id="paraHint">点词池里的词填进空格 · 点已填的空格取回</span>
+      <span class="mio">
+        <button id="paraReveal" class="btn mini" type="button">看答案</button>
+        <button id="paraAgain" class="btn mini" type="button">再来一次</button>
+        <button id="paraCheck" class="btn mini primary" type="button">检查</button>
       </span>
     </div>
   </div>
