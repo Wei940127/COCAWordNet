@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v50";
+const APP_VERSION = "v51";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -1474,8 +1474,12 @@ function speak(word, btnEl, onDone) {
   next();
 }
 function speakCurrent() {
-  if (current !== null) speak(D.words[current]);
-  else if (extraCurrent !== null) speak(extraCurrent);
+  /* 先看 extraCurrent：点词网里的「词表外关联词」节点**不会**改 current
+     （current 仍是上一个词表内焦点），只看 current 的话，卡片上明明写着
+     afterward，念出来的却是 after。extraCurrent 只在词表外卡片显示时非空
+     （renderPanel 渲染词表内词时会把它清掉），所以它就是"当前卡片"。 */
+  if (extraCurrent !== null) speak(extraCurrent);
+  else if (current !== null) speak(D.words[current]);
 }
 $("dSpeak").onclick = speakCurrent;
 $("dPhon").style.cursor = "pointer";
@@ -2098,6 +2102,9 @@ function revealCloze() {
 function openParaCloze() {
   const i = current;
   if (i === null) return;
+  /* 词表外词的卡片显示时 current 仍是上一个词表内词，按 T 会打开别的词的挖空；
+     词表外词本来就没有段落（renderPara 里也是这么挡的），直接不响应。 */
+  if (extraCurrent) return;
   const word = D.words[i], item = paraOf(word);
   if (!item) return;
   buildCloze(i, word, item);
