@@ -66,7 +66,7 @@
   </div>
 
   <div class="stats" id="stats"></div>
-  <button id="verPill" class="verpill" title="当前版本 · 点一下检查更新">v42</button>
+  <button id="verPill" class="verpill" title="当前版本 · 点一下检查更新">v43</button>
 </header>
 
 <main>
@@ -251,7 +251,28 @@
     <div id="rootBody" class="rbody"></div>
     <div class="mfoot">
       <span>一个词根串起一串词：点分组展开同根词，点单词跳到词网并发音 · 只统计已载入的词层，会在后台补齐时自动刷新</span>
-      <span class="mio"><button id="rootToggleAll" class="btn mini" title="展开 / 收起当前筛选下的全部分组">全部展开</button></span>
+      <span class="mio">
+        <button id="rootToggleAll" class="btn mini" title="展开 / 收起当前筛选下的全部分组">全部展开</button>
+        <button id="rootStudy" class="btn mini primary" title="按词根把同根词一组一组过一遍">🧭 开始串记</button>
+      </span>
+    </div>
+  </div>
+</div>
+
+<div id="rsModal" class="modal hidden">
+  <div class="modalCard wide">
+    <div class="mhead">
+      <b>词根串记 <small id="rsSub"></small></b>
+      <button id="rsClose" class="mclose" title="关闭（Esc）">✕</button>
+    </div>
+    <div class="rvbar"><div id="rsFill"></div></div>
+    <div id="rsStage" class="rsstage"></div>
+    <div class="mfoot">
+      <span>一组同根词一起过：认得的点 <b>✓</b>、模糊的点 <b>◐</b>、忘了的点 <b>✗</b>（和复习卡写进同一条记录，之后按间隔重复自动排队）· 点单词听发音、点 🕸 去词网看它的关系（串记会留着）· 快捷键：← / → 切组 · Esc 退出</span>
+      <span class="mio">
+        <button id="rsOrder" class="btn mini" title="切换组间顺序：由易到难 = 先过由常用词组成的词根（组内词层中位数）；词数优先 = 先过同根词最多的组">由易到难 ⇅</button>
+        <button id="rsAll" class="btn mini" title="这一组词太多时先画前 30 个，点这里看全">显示本组全部</button>
+      </span>
     </div>
   </div>
 </div>

@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v42";
+const APP_VERSION = "v43";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -2618,7 +2618,7 @@ function renderStats() {
        <div><i>6</i>多义词用释义上方的词性标签一键切换：只看名词 / 动词 / 形容词的义项</div>
        <div><i>7</i>顶栏「📊 统计」看每天的复习量、记忆保持率和下次复习排期</div>
        <div><i>8</i>词卡里的「易混词」列出形近 / 音近的词，点「辨析」并排对比、还能做小测（快捷键 C）</div>
-       <div><i>9</i>词卡里的「词根拆解」每一段都能点：一个词根串起一串同根词（-spect- → expect / inspect / respect），这是把散词连成串最快的一条路（快捷键 I）</div>
+       <div><i>9</i>词卡里的「词根拆解」每一段都能点：一个词根串起一串同根词（-spect- → expect / inspect / respect），这是把散词连成串最快的一条路（快捷键 I）。在词根索引页点「🧭 开始串记」还能把 411 组词根当学习路径一组组过，评过的词写进和复习卡同一条记录</div>
      </div>` +
     `<div class="hsec">图例</div>` +
     `<div class="li">
@@ -3301,6 +3301,7 @@ function renderRoot() {
             seg +
             '<span class="rcount">' + e.words.length + " 词</span>" +
             '<span class="rkind">' + ROOT_KIND_CN[e.kind] + "</span>" +
+            '<button class="rgo" data-k="' + esc(k) + '" title="从这一组开始串记：一组同根词一起过，每词点一下掌握度">🧭 练</button>' +
             '<span class="rarrow">' + (open ? "▾" : "▸") + "</span>" +
           "</div>" +
           (open ? '<div class="rwords">' + e.words.map(rootChip).join("") + "</div>" : "") +
@@ -3339,6 +3340,7 @@ function openRoot(kind, text) {
   }
   $("rootModal").classList.remove("hidden");
   renderRoot();
+  refreshRootStudyBtn();
   if (rootFocus) requestAnimationFrame(() => {
     const el = Array.from($("rootBody").querySelectorAll(".rgroup"))
       .find(g => g.dataset.k === rootFocus);
@@ -3379,6 +3381,8 @@ function rootToggleGroup(head) {
   renderRoot();
 }
 $("rootBody").addEventListener("click", e => {
+  const go2 = e.target.closest(".rgo");           /* 组头「🧭 练」：从这一组开始串记 */
+  if (go2) { e.stopPropagation(); startRootStudy(go2.dataset.k); return; }
   const chip = e.target.closest(".lw");
   if (chip) {
     const i = +chip.dataset.i;
@@ -3394,6 +3398,7 @@ $("rootBody").addEventListener("keydown", e => {
   if (e.key !== "Enter" && e.key !== " ") return;
   const head = e.target.closest(".rhead");
   if (!head) return;
+  if (e.target.closest(".rgo")) return;        /* 焦点在「🧭 练」上时交给按钮自己处理 */
   e.preventDefault();
   rootToggleGroup(head);
 });
@@ -3407,6 +3412,305 @@ window.COCA_ROOT = {
     return e ? e.words.map(i => D.words[i]) : null;
   },
   state: () => ({ total: rootList().length, expanded: Array.from(rootExpanded), focus: rootFocus })
+};
+
+/* ---------- 词根串记（把词根索引当学习路径，一组一组过） ----------
+   词根索引解决「看得到」，串记解决「记得住」：一组同根词排在一起过一遍，
+   -spect- → expect / inspect / respect / suspect，把散词串成一串。
+
+   和复习卡共用同一条 SRS 记录（applyGrade），所以串记过的词会正常进复习队列、
+   也算进学习统计 —— 差别只在「怎么问」：
+     复习卡：一次一个词，先在心里想，再翻答案自评；
+     串记：一组同根词一起看，快速过一遍，每词点一下掌握度。
+   没有新增数据、没有新增存储：全部基于已载入的 D.morph 现算。 */
+const RS_WORD_CAP = 30;         /* 一组先画多少个词（re / ate 这类大组近百词，先画一屏） */
+let rs = null;                  /* 当前串记会话 */
+let rsOrderMode = "easy";       /* easy = 由易到难（组内词的词层中位数）；size = 词数优先 */
+
+/* 组内词层中位数：这批词的「整体难度」。
+   不能只看组内最常用的那个词（best）—— 1k 层有 1000 个词，几乎每组都挂着一个，
+   best 全等于 1，排出来的顺序等于没排。中位数才区分得开：
+   tend(伸展)/spec(看)/pos(放置)/port(搬运) 这些高频根在前，astr/ceit 这类冷僻根在后。 */
+function rsMed(e) {
+  if (e._med === undefined) {
+    const bs = e.words.map(i => D.band[i] || 9).sort((a, b) => a - b);
+    e._med = bs[bs.length >> 1] || 9;
+  }
+  return e._med;
+}
+
+/* 组间顺序：串记是「从认得的词往外扩」——先过由常用词组成的词根，再往生僻处走 */
+function rsOrder(list) {
+  const a = list.slice();
+  const alpha = (x, y) => (x.t < y.t ? -1 : x.t > y.t ? 1 : 0);
+  if (rsOrderMode === "size") {
+    a.sort((x, y) => (y.words.length - x.words.length) || (x.best - y.best) || alpha(x, y));
+  } else {
+    a.sort((x, y) => (rsMed(x) - rsMed(y)) || (x.best - y.best) ||
+      (y.words.length - x.words.length) || alpha(x, y));
+  }
+  return a;
+}
+
+function startRootStudy(startKey) {
+  const base = rootFiltered().rows;
+  if (!base.length) return false;
+  const list = rsOrder(base);
+  let gi = 0;
+  if (startKey) {
+    const k = list.findIndex(e => rootKeyOf(e) === startKey);
+    if (k >= 0) gi = k;
+  }
+  /* 已有会话时保留累计统计，只在换了一批组时重开 */
+  if (!rs || rs.list.length !== list.length || rootKeyOf(rs.list[0]) !== rootKeyOf(list[0])) {
+    rs = { list: list, gi: 0, grades: [0, 0, 0], n: 0, openAll: false };
+    gi = startKey ? gi : 0;
+  }
+  rs.gi = gi;
+  rs.openAll = false;
+  $("rootModal").classList.add("hidden");
+  $("rsModal").classList.remove("hidden");
+  refreshRootStudyBtn();
+  renderRs();
+  return true;
+}
+
+function rsScopeText() {
+  const seg = rootMode === "all" ? "全部" : ROOT_KIND_CN[rootMode];
+  const q = rootQuery.trim();
+  return seg + (q ? " · 含「" + q + "」" : "") + (rootMultiOnly ? " · ≥2 词" : "");
+}
+
+function rsStatusBadge(s) {
+  return s === 2 ? '<i class="mchip s2">● 已掌握</i>'
+       : s === 1 ? '<i class="mchip s1">◐ 学习中</i>'
+       : "";
+}
+
+function rsRow(i) {
+  const s = statusOf(i);
+  const ready = chunkReady(chunkOf(i));
+  const ph = ready ? D.phon[i] : "";
+  const zh = ready ? zhBrief(i, 22) : "";
+  const tip = D.words[i] + " · " + BAND_NAMES[D.band[i]] + " 词层（第 " + BAND_RANGE[D.band[i]] + " 词）" +
+    (dueText(i) ? " · " + dueText(i) : "");
+  return '<div class="rsrow s' + s + '" data-i="' + i + '" title="' + esc(tip) + '">' +
+    '<button class="rsw" title="点一下听发音">' + esc(D.words[i]) + "</button>" +
+    '<span class="rsphon">' + (ph ? "/" + esc(ph) + "/" : "") + "</span>" +
+    '<span class="rszh">' + (ready ? (zh || '<span class="muted">无中文释义</span>')
+      : '<span class="muted">释义待载入…</span>') + "</span>" +
+    rsStatusBadge(s) +
+    '<span class="rsg">' +
+      '<button class="rsgb q0" data-q="0" title="忘了：10 分钟后再来，掌握度降一级">✗</button>' +
+      '<button class="rsgb q1" data-q="1" title="有印象：间隔小幅延长">◐</button>' +
+      '<button class="rsgb q2" data-q="2" title="记得：间隔翻倍，掌握度升一级">✓</button>' +
+    "</span>" +
+    '<button class="rslook" title="在词网中看它的同义 / 反义 / 上下位词（串记会留着，回来接着过）">🕸</button>' +
+    "</div>";
+}
+
+function rsStatText() {
+  const g = rs.grades;
+  return g[0] + g[1] + g[2]
+    ? "本次已评 <b>" + rs.n + "</b> 张 · 记得 <b class='g2c'>" + g[2] + "</b> · 有印象 <b class='g1c'>" +
+      g[1] + "</b> · 忘了 <b class='g0c'>" + g[0] + "</b>"
+    : "还没评过 —— 认得的点 ✓、模糊的点 ◐、忘了的点 ✗";
+}
+
+/* 组头的难度概况：「已掌握 3 · 学习中 2」/「全部未学」+ 未载入词提示。
+   整组渲染和「评完一个词」都要用，所以抽出来共用（否则评分后容易算成空字符串）。 */
+function rsMetaText(e) {
+  let mst = 0, mid = 0, unready = 0;
+  e.words.forEach(i => {
+    const s = statusOf(i);
+    if (s === 2) mst++; else if (s === 1) mid++;
+    if (!chunkReady(chunkOf(i))) unready++;
+  });
+  return (mst ? "已掌握 " + mst : "") + (mst && mid ? " · " : "") + (mid ? "学习中 " + mid : "") +
+    (!mst && !mid ? "全部未学" : "") + (unready ? " · " + unready + " 词释义待载入" : "");
+}
+
+function renderRs() {
+  if (!rs) return;
+  const e = rs.list[rs.gi];
+  const total = rs.list.length;
+  const words = e.words;
+  const shown = rs.openAll ? words : words.slice(0, RS_WORD_CAP);
+
+  $("rsSub").textContent = "第 " + (rs.gi + 1) + " / " + total + " 组 · " + ROOT_KIND_CN[e.kind] +
+    " · " + rsScopeText() + partsHint();
+  $("rsFill").style.width = Math.round((rs.gi + 1) / total * 100) + "%";
+
+  $("rsStage").innerHTML =
+    '<div class="rstop">' +
+      '<span class="morph"><span class="seg ' + e.kind + '">' + esc(e.t) +
+        (e.gloss ? "<i>" + esc(e.gloss) + "</i>" : "") + "</span></span>" +
+      '<span class="rcount">' + words.length + " 词</span>" +
+      '<span class="rsmeta">' + rsMetaText(e) + "</span>" +
+      '<span class="rkind">' + ROOT_KIND_CN[e.kind] + "</span>" +
+    "</div>" +
+    '<div class="rsbody">' + shown.map(rsRow).join("") +
+      (words.length > shown.length
+        ? '<div class="hmore">本组还有 ' + (words.length - shown.length) +
+          ' 个词没显示 · 点右上角「显示本组全部」</div>'
+        : "") +
+    "</div>" +
+    '<div class="rsnav">' +
+      '<button id="rsPrev" class="btn"' + (rs.gi === 0 ? " disabled" : "") + ">‹ 上一组</button>" +
+      '<span class="rsstat">' + rsStatText() + "</span>" +
+      '<button id="rsNext" class="btn primary">' +
+        (rs.gi >= total - 1 ? "完成串记 🎉" : "下一组 ›") + "</button>" +
+    "</div>";
+
+  const allBtn = $("rsAll");
+  if (allBtn) {
+    allBtn.style.display = words.length > RS_WORD_CAP ? "" : "none";
+    allBtn.textContent = rs.openAll ? "只显示前 " + RS_WORD_CAP + " 个" : "显示本组全部";
+  }
+  const ordBtn = $("rsOrder");
+  if (ordBtn) ordBtn.textContent = rsOrderMode === "easy" ? "由易到难 ⇅" : "词数优先 ⇅";
+  $("rsPrev").onclick = () => rsGoto(-1);
+  $("rsNext").onclick = () => rsGoto(1);
+}
+
+function rsGoto(d) {
+  if (!rs) return;
+  const g = rs.gi + d;
+  if (g < 0) return;
+  if (g >= rs.list.length) return renderRsDone();
+  rs.gi = g; rs.openAll = false;
+  renderRs();
+}
+
+/* 评一个词：写回同一条 SRS 记录，只重画这一行（大组整页重画会闪） */
+function rsGrade(i, q, row) {
+  if (!rs) return;
+  const nowS = applyGrade(i, q).nowS;
+  rs.grades[q]++; rs.n++;
+  if (row) {
+    row.className = "rsrow s" + nowS + " graded";
+    const b = row.querySelector("i.mchip");
+    const html = rsStatusBadge(nowS);
+    if (b) b.outerHTML = html || "";
+    else if (html) row.querySelector(".rszh").insertAdjacentHTML("afterend", html);
+    setTimeout(() => { if (row && row.parentNode) row.classList.remove("graded"); }, 500);
+  }
+  /* 组头的「已掌握 / 学习中」跟着变 */
+  const meta = $("rsStage").querySelector(".rsmeta");
+  if (meta) meta.textContent = rsMetaText(rs.list[rs.gi]);
+  const st = $("rsStage").querySelector(".rsstat");
+  if (st) st.innerHTML = rsStatText();
+  afterGrade();
+}
+
+function renderRsDone() {
+  if (!rs) return;
+  $("rsFill").style.width = "100%";
+  $("rsSub").textContent = "串记结束";
+  const g = rs.grades, total = g[0] + g[1] + g[2];
+  $("rsStage").innerHTML =
+    '<div class="rvdone"><div class="rvbig">' + (total ? "🎉" : "🧩") + "</div>" +
+    "<h3>" + (total ? "这轮 " + rs.list.length + " 组串完了" : "还没有评过词") + "</h3>" +
+    (total
+      ? '<div class="rvsum">记得 <b class="g2c">' + g[2] + "</b> · 有印象 <b class=\"g1c\">" + g[1] +
+        '</b> · 忘了 <b class="g0c">' + g[0] + "</b> · 共 " + rs.n + " 张</div>"
+      : "<p>串记是按词根一组一组过：一组同根词排在一起，认得的点 ✓、模糊的点 ◐、忘了的点 ✗。<br>" +
+        "评过的词会写进和复习卡同一条记录，之后按间隔重复自动排队。</p>") +
+    '<p class="rvdone-note">' + dueSummaryLine() + " · 按同根词组的顺序过，比单看词卡更容易记住词根的含义</p>" +
+    '<div class="rvacts">' +
+      '<button id="rsRestart" class="btn primary">从头再串一遍</button>' +
+      '<button id="rsBackList" class="btn">回到词根索引</button>' +
+      '<button id="rsClose2" class="btn">结束</button>' +
+    "</div></div>";
+  $("rsRestart").onclick = () => { rs.gi = 0; rs.openAll = false; renderRs(); };
+  $("rsBackList").onclick = () => { closeRootStudy(); openRoot(); };
+  $("rsClose2").onclick = closeRootStudy;
+}
+
+function closeRootStudy() {
+  $("rsModal").classList.add("hidden");
+  refreshRootStudyBtn();
+}
+
+/* 入口按钮文案跟着会话状态走：没开过 = 开始串记；开着 = 继续第 x 组 */
+function refreshRootStudyBtn() {
+  const b = $("rootStudy");
+  if (!b) return;
+  const live = rs && rs.list && rs.gi < rs.list.length;
+  b.textContent = live ? "▶ 继续串记（第 " + (rs.gi + 1) + " / " + rs.list.length + " 组）" : "🧭 开始串记";
+  b.title = live
+    ? "回到串记（从第 " + (rs.gi + 1) + " 组接着过）"
+    : "按词根把同根词一组一组过一遍：认得的点 ✓、模糊的点 ◐、忘了的点 ✗（评过的词写进同一条复习记录）";
+}
+
+$("rsClose").onclick = closeRootStudy;
+$("rsModal").addEventListener("click", e => { if (e.target === $("rsModal")) closeRootStudy(); });
+$("rootStudy").onclick = () => startRootStudy(rootFocus || "");
+$("rsOrder").onclick = () => {
+  rsOrderMode = rsOrderMode === "easy" ? "size" : "easy";
+  if (rs) {
+    const cur = rootKeyOf(rs.list[rs.gi]);
+    rs.list = rsOrder(rootFiltered().rows);
+    const k = rs.list.findIndex(e => rootKeyOf(e) === cur);
+    rs.gi = k >= 0 ? k : 0;
+    renderRs();
+  }
+};
+$("rsAll").onclick = () => { if (rs) { rs.openAll = !rs.openAll; renderRs(); } };
+$("rsStage").addEventListener("click", e => {
+  const gb = e.target.closest(".rsgb");
+  if (gb) { rsGrade(+gb.closest(".rsrow").dataset.i, +gb.dataset.q, gb.closest(".rsrow")); return; }
+  const w = e.target.closest(".rsw");
+  if (w) { speak(w.textContent); return; }
+  const look = e.target.closest(".rslook");
+  if (look) {                                   /* 去词网看它的关系：会话留着，回来接着串 */
+    const i = +look.closest(".rsrow").dataset.i;
+    closeRootStudy();
+    go(i);
+    speak(D.words[i]);
+  }
+});
+/* 串记时的键盘：← / → 切组，Esc 退出；1/2/3 评不了（一屏多个词，得先点到具体哪个） */
+document.addEventListener("keydown", e => {
+  if ($("rsModal").classList.contains("hidden")) return;
+  if (e.key === "Escape") { closeRootStudy(); return; }
+  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+  if (!rs) return;
+  if (e.key === "ArrowLeft") { rsGoto(-1); e.preventDefault(); }
+  else if (e.key === "ArrowRight") { rsGoto(1); e.preventDefault(); }
+});
+
+/* 供自动化测试/排查用：词根串记引擎 */
+window.COCA_RS = {
+  start: (key) => startRootStudy(key),
+  state: () => rs && {
+    total: rs.list.length, gi: rs.gi, n: rs.n, grades: rs.grades, openAll: rs.openAll,
+    order: rsOrderMode, group: rootKeyOf(rs.list[rs.gi]),
+    seq: rs.list.slice(0, 6).map(rootKeyOf),
+    words: rs.list[rs.gi].words.map(i => D.words[i]),
+    shown: (rs.openAll ? rs.list[rs.gi].words : rs.list[rs.gi].words.slice(0, RS_WORD_CAP)).length,
+    hidden: !$("rsModal").classList.contains("hidden")
+  },
+  order: (m) => { rsOrderMode = m; if (rs) {
+    const cur = rootKeyOf(rs.list[rs.gi]);
+    rs.list = rsOrder(rootFiltered().rows);
+    const k = rs.list.findIndex(e => rootKeyOf(e) === cur);
+    rs.gi = k >= 0 ? k : 0; renderRs();
+  } return rsOrderMode; },
+  next: () => rsGoto(1), prev: () => rsGoto(-1),
+  goto: (k) => { if (rs) { rs.gi = Math.max(0, Math.min(rs.list.length - 1, k)); rs.openAll = false; renderRs(); } },
+  end: () => renderRsDone(),
+  grade: (word, q) => {
+    const i = D.idx[word];
+    if (i === undefined || !rs) return null;
+    const row = Array.from($("rsStage").querySelectorAll(".rsrow")).find(r => +r.dataset.i === i);
+    rsGrade(i, q, row);
+    const rec = prog[word] || {};
+    return { hasRow: !!row, s: rec.s, ivl: rec.ivl, reps: rec.reps, laps: rec.laps,
+      dueInMin: Math.round(((rec.due || 0) - Date.now()) / 60000) };
+  },
+  close: () => closeRootStudy(),
+  open: () => startRootStudy("")
 };
 
 /* ---------- 易混词辨析弹窗 ---------- */
@@ -3594,19 +3898,26 @@ function revealCard(i) {
   g.querySelectorAll(".gbtn").forEach(b => b.onclick = () => gradeCard(+b.dataset.q));
 }
 
-function gradeCard(q) {
-  if (!rv || rv.idx >= rv.queue.length) return;
-  const i = rv.queue[rv.idx];
+/* 评一个词的掌握度：写回同一条 SRS 记录 + 记统计。
+   复习卡和词根串记只是「怎么问」不同，记录是同一份 —— 所以抽出这一层共用。 */
+function applyGrade(i, q) {
   const key = D.words[i];
   const prevS = (prog[key] && prog[key].s) || 0;
   prog[key] = srsNext(prog[key] || {}, q, Date.now());
   saveProg();
   const nowS = prog[key].s || 0;
-  /* 统计日志：张数 + 评分档位；顺带记下复习过程中发生的掌握度跃迁 */
+  /* 统计日志：张数 + 评分档位；顺带记下过程中发生的掌握度跃迁 */
   statBump("rv");
   statBump(q === 2 ? "ok" : q === 1 ? "mid" : "bad");
   if (!prevS && nowS) statBump("nw");
   if (prevS !== 2 && nowS === 2) statBump("mst");
+  return { prevS: prevS, nowS: nowS };
+}
+
+function gradeCard(q) {
+  if (!rv || rv.idx >= rv.queue.length) return;
+  const i = rv.queue[rv.idx];
+  applyGrade(i, q);
   if (q === 2) rv.ok++;
   else if (q === 1) rv.mid++;
   else { rv.bad++; rv.again.push(i); }
@@ -4051,6 +4362,7 @@ document.querySelectorAll(".quick button").forEach(b => b.onclick = () => go(b.d
 
 document.addEventListener("keydown", e => {
   if (!$("reviewModal").classList.contains("hidden")) return;   /* 复习界面自己有键盘操作 */
+  if (!$("rsModal").classList.contains("hidden")) return;       /* 串记界面同理（←/→ 切组） */
   if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
   if (e.key === "r" || e.key === "R") { if (rvPaused) resumeReview(); else startReview(); return; }
   if (e.key === "n" || e.key === "N") nextWord();

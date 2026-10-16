@@ -707,6 +707,86 @@ main { flex: 1; display: flex; min-height: 0; }
 }
 .mlink:hover { text-decoration: underline; }
 
+/* ---------- 词根串记（把同根词一组一组过） ---------- */
+/* 组头的「🧭 练」：平时低调，鼠标移到这一组才亮起来 */
+.rhead .rgo {
+  margin-left: auto; margin-right: 4px;
+  border: 1px solid #e2e8f0; background: #fff; color: #475569;
+  border-radius: 7px; padding: 2px 8px; font-size: 11.5px; cursor: pointer;
+  font-family: inherit; opacity: .62;
+}
+.rhead:hover .rgo, .rhead .rgo:focus { opacity: 1; border-color: #93c5fd; color: #1d4ed8; }
+.rhead .rgo:hover { background: #eff6ff; }
+.rhead .rgo + .rarrow { margin-left: 0; }
+
+#rsModal .modalCard { width: min(760px, 95vw); }
+#rsModal .rvbar { margin-bottom: 12px; }
+.rvbar #rsFill {
+  height: 100%; width: 0; border-radius: 99px;
+  background: linear-gradient(90deg, #34d399, #0d9488);
+  transition: width .25s ease;
+}
+.rsstage { min-height: 320px; }
+.rstop {
+  display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+  padding-bottom: 10px; border-bottom: 1px solid #eef2f7;
+}
+.rstop .seg { font-size: 15px; padding: 5px 12px; }
+.rsmeta { font-size: 12px; color: #64748b; }
+.rsrow + .rsmeta { margin-left: 0; }
+.rsbody {
+  max-height: 48vh; overflow: auto; padding: 10px 2px 2px;
+  display: flex; flex-direction: column; gap: 5px;
+}
+.rsrow {
+  display: flex; align-items: center; gap: 9px;
+  padding: 5px 9px; border: 1px solid #eef2f7; border-radius: 9px; background: #fff;
+  transition: background .18s ease;
+}
+.rsrow.s1 { background: #fffcf3; }
+.rsrow.s2 { background: #f6fdf9; }
+.rsrow.graded { background: #eff6ff; }
+.rsw {
+  border: none; background: none; padding: 0; font: inherit; cursor: pointer;
+  font-size: 15px; font-weight: 600; color: #0f172a; letter-spacing: .2px;
+}
+.rsw:hover { color: #1d4ed8; text-decoration: underline; }
+.rsphon {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px; color: #94a3b8; min-width: 116px;
+}
+.rszh {
+  flex: 1; min-width: 0; font-size: 12.5px; color: #475569;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.rsrow i.mchip { font-style: normal; white-space: nowrap; }
+.rsg { display: flex; gap: 4px; }
+.rsgb {
+  width: 27px; height: 24px; border: 1px solid #e2e8f0; background: #fff;
+  border-radius: 6px; cursor: pointer; font-size: 12px; color: #64748b; line-height: 1;
+  font-family: inherit; transition: all .12s ease;
+}
+.rsgb.q0:hover { border-color: #fca5a5; background: #fef2f2; color: #b91c1c; }
+.rsgb.q1:hover { border-color: #fcd34d; background: #fffbeb; color: #b45309; }
+.rsgb.q2:hover { border-color: #86efac; background: #f0fdf4; color: #15803d; }
+.rsgb:active { transform: translateY(1px); }
+.rslook {
+  border: 1px solid #e2e8f0; background: #fff; border-radius: 6px; cursor: pointer;
+  padding: 2px 6px; font-size: 12px; color: #64748b; line-height: 1.2; font-family: inherit;
+}
+.rslook:hover { border-color: #93c5fd; color: #1d4ed8; }
+.rsnav {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 12px; padding-top: 10px; border-top: 1px solid #eef2f7;
+}
+.rsstat { flex: 1; font-size: 12px; color: #64748b; text-align: center; }
+.rsstat b { font-weight: 600; }
+@media (max-width: 640px) {
+  .rsphon { display: none; }
+  .rsrow i.mchip { display: none; }
+  .rsbody { max-height: 56vh; }
+}
+
 /* ---------- boot loader ---------- */
 .loader {
   position: fixed; inset: 0; z-index: 100;
