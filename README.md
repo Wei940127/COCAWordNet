@@ -157,7 +157,7 @@ CWN1.hs18b.3.22-2-0.7-1-0.1h4-1-0
 | 语义相关词        | [GloVe](https://nlp.stanford.edu/projects/glove/) 6B 50d 词向量 (Stanford NLP)                                                                                                 |
 | 释义/音标/中文翻译   | [ECDICT](https://github.com/skywind3000/ECDICT) 开源英汉词典                                                                                                                      |
 | 搭配语料         | [text8](http://mattmahoney.net/dc/textdata.html) (Wikipedia corpus) + Google Books n-gram（经 [Datamuse](https://www.datamuse.com/api/) 接口，构建期抓取烘焙进静态数据，运行时零依赖）                                                              |
-| 美式真人发音       | 有道词典在线接口（离线回退 Web Speech API）                                                                                                                                               |
+| 美式真人发音       | 有道词典在线接口；没有真人音的词（多数短语、整句）直接用系统语音合成，不再空等网络 TTS（见下）                                                                                                                                               |
 | 图形渲染         | [D3.js](https://d3js.org/) v7（已本地化，无 CDN 依赖）                                                                                                                                |
 
 ## 🛠 技术说明
@@ -166,6 +166,7 @@ CWN1.hs18b.3.22-2-0.7-1-0.1h4-1-0
 - 词库被拆成「骨架 + 分块」，按需载入：`data_core.js`（约 200KB gzip，词表 / 词层 / 下标 / 别名，随首屏一起加载），`data_b01.js`～`data_b10.js`（每块 1000 词的释义 / 音标 / 关系边 / 构词 / 搭配 / 例句），`data_net_bNNa.js`～`data_net_bNNd.js`（段落记忆：按「词层 + 每 250 词一个子块」命名，一层最多 4 个子块；b01 是 529 词、b02 是 516 词、b03 是 404 词。打开某个词时**只取它所在的那一个子块**（约 48–68KB gzip，不是整层 200KB+），不进首屏预缓存），`data_extra.js` + `data_extra_def.js`（词表外词及其释义），`data_zh.js`（中文释义搜索索引，约 219KB gzip，第一次输入中文时才载入）。首屏因此只需 ~350KB gzip，其余在后台预热或点到时再取
 - 离线 / 可安装：`sw.js`（Service Worker）预缓存应用外壳与数据骨架，各分块首次用到时再缓存，`manifest.webmanifest` + `apple-touch-icon.png` 提供「添加到主屏幕」能力（PWA）
 - 学习状态（掌握度）存于 localStorage，不上传任何数据
+- 发音分三级，且在**点击那一刻同步决定**（iOS 只认用户手势，等失败再异步回退会被静默丢帧）：① 有道真人美音 —— 单字几乎全有、短语约三成有，**没命中也只要 0.2 秒**（返回 500 而非音频），所以一律先试；② 系统语音合成 —— 零延迟、离线可用，没有真人音的短语和所有整句都走它；③ ResponsiveVoice 网络 TTS —— 只在设备没有系统语音时兜底。全程复用**同一个 `<audio>` 元素**，并在第一次触摸时用一小段静音把它解锁：旧版每点一次都 `new Audio()`，会让「音源失败后自动回退」那一跳被 iOS 自动播放策略拦掉，表现就是「点两下才出声」。说明面板里可切换「系统语音 / 网络语音」
 - 建议使用 Chrome / Edge / Firefox 现代浏览器；iPad 上请用 Safari 添加到主屏幕
 
 ## 📄 License

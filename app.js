@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v52";
+const APP_VERSION = "v53";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -1319,8 +1319,20 @@ function hideTip() { tooltip.classList.add("hidden"); }
 /* ---------- side panel ---------- */
 const $ = id => document.getElementById(id);
 
-/* ---------- American pronunciation ---------- */
-let US_VOICE = null, curAudio = null;
+/* ---------- American pronunciation ----------
+   2026-10-16 重做（起因：iPad 上「音频加载很慢 / 有的要点两下」）：
+   ① 有道 dictvoice 真人音：单字几乎全有，短语约三成有。**没命中也只要 0.2s**
+      （返回 500 + 120 字节 JSON，<audio> 立刻报错），所以一律先试 —— 命中就是
+      又快又正的真人音，比"猜错音源"划算得多。
+   ② 本地系统语音 speechSynthesis：零延迟、离线可用，没有真人音的词（绝大多数
+      短语、所有整句）都走它。旧版这里排的是 ResponsiveVoice，但它在国内要绕
+      Cloudflare，实测 3.5s 起步甚至 30s 超时 —— 那正是"加载很慢"的元凶。
+   ③ 全程只有一个 <audio> 元素，并且第一次触摸时用一小段静音把它"解锁"：
+      iOS 只认用户手势，每点一次就 new Audio() 会让「音源失败后自动回退」那一跳
+      被自动播放策略拦掉 —— 表现就是「点第二遍才出声」。
+   ④ 面板刷新时**不再**做批量静默探测：旧版同时发十几条 metadata 请求，把小水管
+      占满，真正的播放请求反而排在后面等（这也是"慢"的一大来源）。 */
+let US_VOICE = null, curAudio = null, audioEl = null, speakTok = 0;
 function pickVoice() {
   if (!("speechSynthesis" in window)) return;
   const vs = speechSynthesis.getVoices();
@@ -1329,38 +1341,53 @@ function pickVoice() {
     vs.find(v => /English \(United States\)/i.test(v.name)) ||
     vs.find(v => /^en/i.test(v.lang)) || null;
 }
-if ("speechSynthesis" in window) {
+const HAS_LOCAL_TTS = "speechSynthesis" in window;
+if (HAS_LOCAL_TTS) {
   pickVoice();
   speechSynthesis.onvoiceschanged = pickVoice;
 }
-function speakLocal(word) {
-  if (!("speechSynthesis" in window)) return;
+
+/* 发音偏好：local=系统语音（默认，秒出、离线可用）/ net=网络语音（音色统一但要等） */
+const TTS_PREF_KEY = "coca10000.tts.v1";
+let ttsPref = "local";
+try { const v = localStorage.getItem(TTS_PREF_KEY); if (v === "net" || v === "local") ttsPref = v; } catch (e) {}
+function setTtsPref(v) { ttsPref = (v === "net") ? "net" : "local"; try { localStorage.setItem(TTS_PREF_KEY, ttsPref); } catch (e) {} }
+
+/* 本地系统语音（iPad 上就是系统美音）。
+   done 必须在读完时回调 —— 通读全段靠它一句接一句地排下去。 */
+function speakLocal(word, done) {
+  if (!HAS_LOCAL_TTS) { if (done) done(); return false; }
+  const tok = speakTok;                       /* 期间用户点了别的词就不再回调，免得把队列带跑 */
   const u = new SpeechSynthesisUtterance(word);
   u.lang = "en-US";
   u.rate = 0.85;
   if (US_VOICE) u.voice = US_VOICE;
+  let fin = false;
+  const end = () => {
+    if (fin) return;
+    fin = true;
+    clearTimeout(guard);
+    if (tok !== speakTok) return;             /* 已经被新的朗读顶掉了 */
+    if (done) { try { done(); } catch (e) {} }
+  };
+  /* 有的设备语音没装全：speak() 之后 onend 永远不来 —— 按长度估个上限兜底 */
+  const guard = setTimeout(end, 1200 + word.length * 120);
+  u.onend = end;
+  u.onerror = end;
   /* 这里**不要**再 cancel 一次：speak() 开头已经处理过打断，
      同一 tick 里 cancel()+speak() 连调会让 Chrome / iOS 把这次朗读吞掉。 */
-  try { speechSynthesis.speak(u); } catch (e) {}
+  try { speechSynthesis.speak(u); } catch (e) { end(); return false; }
+  return true;
 }
 
-/* ---- 发音音源 ----
-   ① 有道真人音（type=2 美音）：单字几乎全有，但**短语约 55% 它没有音频**，
-      这种情况它返回 HTTP 500（内容是 JSON 不是 mp3），<audio> 立刻报错（媒体错误码 4）。
-   ② ResponsiveVoice 的 en-US 语音（默认的 g1 = Google 美音）：
-      **任意文本都能读**，实测 42 条真实搭配 42 条成功、350–900ms。
-      它同样是普通的 <audio> 网络音频，所以 iPad 上也能出声。
-   ③ 浏览器本地语音合成：离线兜底。
-
-   关键：音源顺序在**点击那一刻同步决定**（用已缓存的探测结果），
-   因为 iOS 只认用户手势 —— 等播放失败再异步回退，iOS 会静默丢帧、什么也听不到。
-   所以：已知没有真人音的短语 → 直接用 ②；没探测过的短语 → 也用 ②（反向概率低）。 */
+/* ---- 音源 ----
+   有道真人音（type=2 美音）：单字几乎全有，短语约三成有，未命中是 500 而不是音频。
+   RV（ResponsiveVoice，sv=g1 = Google 美音）任意文本都能读、还带 CORS，
+   但在国内要绕 Cloudflare，现在只当"设备没有系统语音"时的备胎。 */
 const YOUDAO_VOICE = w => "https://dict.youdao.com/dictvoice?audio=" + encodeURIComponent(w) + "&type=2";
-/* sv=g1 是唯一在浏览器里可用的高质量美音（m1/m2/f1/f2/默认值都返回空音频） */
 const RV_VOICE = w => "https://code.responsivevoice.org/getvoice.php?t=" + encodeURIComponent(w) +
   "&tl=en-US&sv=g1&vn=&pitch=0.5&rate=0.5&vol=1";
 const HAS_DICT_KEY = "coca10000.hasdict.v1";
-const PROBE_FRESH = 7 * 24 * 3600 * 1000;   /* 探测结果 7 天内有效 */
 
 let hasDict = {};
 try { hasDict = JSON.parse(localStorage.getItem(HAS_DICT_KEY) || "{}") || {}; } catch (e) { hasDict = {}; }
@@ -1373,84 +1400,77 @@ function rememberDict(w, ok) {
   try { localStorage.setItem(HAS_DICT_KEY, JSON.stringify(hasDict)); } catch (e) {}
 }
 
-/* 静默探测若干词有没有真人音（只下元数据，不播放） */
-function probeDict(words) {
-  if (navigator.onLine === false) return;
-  words.forEach(w => {
-    const rec = hasDict[w];
-    if (rec && Date.now() - (rec.t || 0) < PROBE_FRESH) return;
-    hasDict[w] = { ok: false, t: Date.now(), probing: true };   /* 占位，避免同一批重复探测 */
-    let a;
-    try { a = document.createElement("audio"); } catch (e) { return; }
-    a.preload = "metadata";
-    let settled = false;
-    const finish = (ok, hard) => {
-      if (settled) return;
-      settled = true;
-      /* 只有"这个源本身没有内容"（媒体错误码 4 / 被 ORB 拦）才记成没有；
-         网络类失败保持"未知"，下次还会再试，免得把好词误判成没音频。 */
-      if (ok) rememberDict(w, true);
-      else if (hard) rememberDict(w, false);
-      else {
-        delete hasDict[w];
-        try { localStorage.setItem(HAS_DICT_KEY, JSON.stringify(hasDict)); } catch (e) {}
-      }
-      try { a.removeAttribute("src"); a.load(); } catch (e) {}
-    };
-    a.addEventListener("loadedmetadata", () => finish(true));
-    a.addEventListener("error", () => finish(false, !!(a.error && a.error.code === 4)));
-    setTimeout(() => finish(false, false), 6000);
-    a.src = YOUDAO_VOICE(w);
-  });
+/* 全程复用同一个 <audio>（见文件头 ③） */
+function getAudioEl() {
+  if (!audioEl) {
+    try { audioEl = new Audio(); audioEl.preload = "auto"; } catch (e) { audioEl = null; }
+  }
+  return audioEl;
 }
+/* iOS 上程序化播放要先解锁：首次触摸时用静音片段空跑一次
+   （8000Hz 8bit 单声道 0.05 秒的规范 WAV，静音但能过解码器） */
+const SILENT_WAV = "data:audio/wav;base64,UklGRrQBAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YZABAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA";
+let audioUnlocked = false;
+function unlockAudio() {
+  if (audioUnlocked) return;
+  audioUnlocked = true;
+  const a = getAudioEl();
+  if (!a) return;
+  const off = () => { try { a.muted = false; } catch (e) {} };
+  try { a.muted = true; a.src = SILENT_WAV; } catch (e) { off(); return; }
+  const p = a.play();
+  if (p && p.then) p.then(off, off); else off();
+}
+["pointerdown", "touchstart", "mousedown", "keydown"].forEach(t =>
+  document.addEventListener(t, unlockAudio, { once: true, capture: true, passive: true }));
 
 /* btn: 可选，点击的那个小按钮（搭配/关联词），一起显示播放态 */
 function speak(word, btnEl, onDone) {
   if (!word) return;
+  speakTok++;                                 /* 作废上一条还没读完的回调 */
   const btn = $("dSpeak");
-  btn.classList.add("playing");
+  if (btn) btn.classList.add("playing");
   if (btnEl) btnEl.classList.add("playing");
   let over = false;
   const done = () => {
     if (over) return;
     over = true;
-    btn.classList.remove("playing");
+    if (btn) btn.classList.remove("playing");
     if (btnEl) btnEl.classList.remove("playing");
-    /* 通读全段靠这个回调一句接一句（本地兜底那条路不会调它） */
+    /* 通读全段靠这个回调一句接一句 */
     if (onDone) { try { onDone(); } catch (e) {} }
   };
 
-  if (curAudio) { try { curAudio.pause(); } catch (e) {} curAudio = null; }
+  if (curAudio) { try { curAudio.pause(); } catch (e) {} }
   /* 只在**真的正在朗读**时才打断：无事发生时的 cancel() 紧接 speak() 会被浏览器吞掉 */
-  if ("speechSynthesis" in window && (speechSynthesis.speaking || speechSynthesis.pending)) {
+  if (HAS_LOCAL_TTS && (speechSynthesis.speaking || speechSynthesis.pending)) {
     try { speechSynthesis.cancel(); } catch (e) {}
   }
 
   const online = navigator.onLine !== false;
   const known = hasDict[word];
-  const dictBad = !!(known && known.ok === false);          /* 探测过：确定没有真人音 */
-  const dictGood = !!(known && known.ok === true);          /* 探测过：确定有真人音 */
-  const isPhrase = /\s/.test(word);
+  /* 负面记录只信 7 天：万一误标（网络抖动被记成没音频），一周后还会再给有道一次机会 */
+  const dictBad = !!(known && known.ok === false && Date.now() - (known.t || 0) < 6048e5);
+  const longText = word.split(/\s+/).length >= 5;    /* 整句：有道那边肯定没有，别白试 */
 
   /* 同步排好音源顺序，点击手势不丢 */
   const srcs = [];
-  if (online) {
-    /* 单字默认先试真人音；短语只有在"确认有真人音"时才先试，
-       否则直接用 ②（短语没有真人音的概率太高，先失败会白白拖 600ms） */
-    if (!dictBad && (!isPhrase || dictGood)) srcs.push(["dict", YOUDAO_VOICE(word)]);
-    srcs.push(["rv", RV_VOICE(word)]);
-  }
+  if (online && !dictBad && !longText) srcs.push("dict");
+  if (ttsPref === "net" && online) srcs.push("rv");
+  if (HAS_LOCAL_TTS) srcs.push("local");
+  if (ttsPref !== "net" && online) srcs.push("rv");  /* 系统语音都叫不出来时，才退到网络 TTS */
 
   let i = 0;
   const next = () => {
     if (over) return;
-    if (i >= srcs.length) { done(); speakLocal(word); return; }   /* 离线 / 都失败 → 本地语音 */
-    const tag = srcs[i][0], url = srcs[i][1];
-    i++;
-    let a;
-    try { a = new Audio(url); } catch (e) { next(); return; }
+    if (i >= srcs.length) { done(); return; }
+    const tag = srcs[i++];
+    if (tag === "local") { if (!speakLocal(word, done)) next(); return; }
+    const url = tag === "dict" ? YOUDAO_VOICE(word) : RV_VOICE(word);
+    const a = getAudioEl();
+    if (!a) { next(); return; }
     curAudio = a;
-    let moved = false, started = false, timer = 0;
+    let moved = false, started = false, timer = 0, lastData = Date.now();
     /* onerror 和 play() 的 reject 会同时到达 —— 必须去重，
        否则本地 TTS 会被连叫两遍，cancel()+speak() 互相打断反而没声音。 */
     const skip = hard => {
@@ -1458,16 +1478,24 @@ function speak(word, btnEl, onDone) {
       moved = true;
       clearTimeout(timer);
       try { a.pause(); } catch (e) {}
-      if (curAudio === a) curAudio = null;
       /* 只有"源本身没内容"（媒体错误码 4）才记进缓存，网络抖动不记 */
       if (hard && online && tag === "dict") rememberDict(word, false);
       next();
     };
+    const onData = () => { lastData = Date.now(); };
     a.addEventListener("error", () => skip(!!(a.error && a.error.code === 4)));
     a.addEventListener("playing", () => { started = true; clearTimeout(timer); });
+    ["progress", "loadedmetadata", "loadeddata", "canplay"].forEach(t => a.addEventListener(t, onData));
     a.onended = done;
-    /* 网络卡住时 play() 既不 resolve 也不 reject，加个看门狗避免永远没声 */
-    timer = setTimeout(() => { if (!started) skip(false); }, 4200);
+    /* 看门狗：只要还在进数据就不算卡住（移动网慢时别误判），5 秒毫无动静才换源 */
+    const tick = () => {
+      if (moved || over || started) return;
+      if (Date.now() - lastData > 5000) { skip(false); return; }
+      timer = setTimeout(tick, 1000);
+    };
+    timer = setTimeout(tick, 1000);
+    a.muted = false;                          /* 解锁那一下曾经静音过，这里务必还原 */
+    try { a.src = url; } catch (e) { skip(false); return; }
     const p = a.play();
     if (p && p.catch) p.catch(e => skip(!!(e && e.name === "NotSupportedError")));
   };
@@ -1744,8 +1772,6 @@ function extraTrans(i) { return (D.extraTrans && D.extraTrans[i]) || ""; }
 function renderExtraPanel(node) {
   const i = node.i, word = D.extra[i];
   extraCurrent = word;
-  /* 顺便探一下这个词有没有真人音：有的话点击时就播真人音，没有就走网络 TTS */
-  probeDict([word]);
   $("ph").classList.add("hidden");
   $("detail").classList.remove("hidden");
   $("dWord").textContent = word;
@@ -1963,6 +1989,8 @@ function stopParaRead() {
   paraPlaying = false;
   clearTimeout(paraTimer);
   if (curAudio) { try { curAudio.pause(); } catch (e) {} curAudio = null; }
+  /* 句子走的是系统语音这条路，光暂停 <audio> 停不下来 */
+  if (HAS_LOCAL_TTS) { try { speechSynthesis.cancel(); } catch (e) {} }
   const btn = $("dParaPlay");
   if (btn) { btn.classList.remove("on"); btn.textContent = "▶ 通读全段"; }
 }
@@ -2577,8 +2605,6 @@ function renderPanel(i, extraNode) {
     $("dColl").querySelectorAll(".colb").forEach(b => {
       b.onclick = () => speak(b.dataset.p, b);
     });
-    /* 顺手探测这批搭配有没有真人音：点击时才好同步决定用哪个音源 */
-    probeDict(cl.map(x => x[0]));
   } else {
     $("dColl").innerHTML = "";
   }
@@ -2972,6 +2998,12 @@ function renderStats() {
        <div><i>9</i>词卡里的「词根拆解」每一段都能点：一个词根串起一串同根词（-spect- → expect / inspect / respect），这是把散词连成串最快的一条路（快捷键 I）。在词根索引页点「🧭 开始串记」还能把 411 组词根当学习路径一组组过，评过的词写进和复习卡同一条记录</div>
        <div><i>10</i>词卡里的「段落记忆」把这个词网编成一段小情景文：带色的就是它的关系词，点句子朗读、点彩色词跳回词网，点「挖空练习」用词池把挖掉的词填回去（快捷键 T）。读完一段，这些词就活在同一个语境里了</div>
      </div>` +
+    `<div class="hsec">发音</div>` +
+    `<div class="hlist">
+       <div><i>1</i>单字和一部分短语用的是有道真人美音（点一下就出）；短语没有真人音时会立刻换成系统语音，不用干等</div>
+       <div><i>2</i>想统一音色、愿意多等一两秒：切到下面的「网络语音」</div>
+     </div>` +
+    `<div class="li" style="margin:2px 0 8px"><button id="ttsTog" class="btn" type="button"></button></div>` +
     `<div class="hsec">图例</div>` +
     `<div class="li">
        <span class="sw" style="background:#16a34a"></span>已掌握
@@ -3000,6 +3032,17 @@ function renderStats() {
      </div>` +
     `</div>`;
   document.body.appendChild(pop);
+
+  /* 发音偏好开关（没有真人音的词用哪种声音） */
+  const ttsBtn = pop.querySelector("#ttsTog");
+  if (ttsBtn) {
+    const paint = () => {
+      ttsBtn.textContent = ttsPref === "net" ? "发音偏好：网络语音（较慢）" : "发音偏好：系统语音（秒出）";
+      ttsBtn.title = "没有真人音的词（多数短语、整句）用哪种声音朗读";
+    };
+    paint();
+    ttsBtn.onclick = () => { setTtsPref(ttsPref === "net" ? "local" : "net"); paint(); };
+  }
 
   /* 贴着按钮放；右边/下边放不下就翻转 */
   function place() {
