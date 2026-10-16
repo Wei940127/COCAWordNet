@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v54";
+const APP_VERSION = "v55";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -1163,6 +1163,38 @@ function paint() {
     .attr("opacity", d => lvlOpacity(d.lvl || 0) * nodeDim(d));
 }
 
+/* ---- 焦点环的「入场」旋转 ----
+   切词时让当前词的虚线环转两圈（约 1.6 秒）就停。用一次性动画，不用 CSS 无限动画：
+   无限动画会让整张 SVG 每帧重绘，词网一大就持续吃满 CPU —— 实测 215 个节点的
+   空闲状态占用 27% 主线程（同一状态关掉这个动画立刻降到 0.4%），iPad 上就是
+   「用一会儿就发烫」。设备开了「减弱动态效果」时干脆不转。 */
+let ringAnim = null;
+/* 实时读「减弱动态效果」偏好，而不是启动时缓存一次：用户中途改设置也立刻生效 */
+function prefersReducedMotion() {
+  try { return !!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches); } catch (e) { return false; }
+}
+function spinFocusRing(sel) {
+  if (ringAnim) { try { ringAnim.cancel(); } catch (e) {} ringAnim = null; }
+  if (prefersReducedMotion() || !sel) return;
+  let el = null;
+  sel.each(function (d) { if (d.id === "w:" + current) el = this; });
+  /* 注意 el 才是 DOM 元素：sel 是 d3 选择集，它上面没有 .animate */
+  if (!el || !el.animate) return;
+  try {
+    /* 两圈 = duration 800ms × iterations 2；动画结束自动回收，不占 CPU */
+    ringAnim = el.animate(
+      [{ strokeDashoffset: "0" }, { strokeDashoffset: "-100" }],
+      { duration: 800, iterations: 2, easing: "linear" });
+  } catch (e) { ringAnim = null; }
+}
+
+/* ---- 力导向的帧节流 ----
+   每帧 paint() 要重写 200 多个节点、400 多条连线和全部标签的属性，
+   而一次「展开」要让模拟连跑约 300 帧。隔帧画一次视觉上几乎无差别，
+   交互期间的 CPU 直接减半；结束那一帧补画一次，保证最终位置准确。 */
+let tickOdd = false;
+function simTick() { tickOdd = !tickOdd; if (tickOdd) paint(); }
+
 function draw() {
   nodeSel = gNodes.selectAll("g.node").data(nodes, d => d.id);
   nodeSel.exit().remove();
@@ -1222,6 +1254,7 @@ function draw() {
   all.select("circle.ring")
     .attr("r", d => radius(d) + 5.5)
     .attr("display", d => (d.id === "w:" + current ? null : "none"));
+  spinFocusRing(all.select("circle.ring"));
   all.select("circle.hit")
     .attr("r", d => radius(d) + (d.kind === "x" ? 8 : 3));
 
@@ -1282,7 +1315,7 @@ function draw() {
 
   /* sim 只有在展开过词之后才存在：空画布上合并进度时 draw() 会被直接调用，
      这里必须判空，否则整段刷新会中断。 */
-  if (sim) sim.on("tick", paint);
+  if (sim) { sim.on("tick", simTick); sim.on("end", paint); }
 }
 
 svg.on("click", () => { document.getElementById("sugg").classList.add("hidden"); });

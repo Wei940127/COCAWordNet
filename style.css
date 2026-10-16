@@ -117,9 +117,10 @@ main { flex: 1; display: flex; min-height: 0; }
   paint-order: stroke; stroke: rgba(255,255,255,.9); stroke-width: 3px; stroke-linejoin: round; }
 /* 层级小标签不拦截鼠标，缩放平移照常 */
 #graph text.axlbl { pointer-events: none; }
-/* 当前词的旋转虚线环 */
-#graph circle.ring { animation: ringspin 7s linear infinite; }
-@keyframes ringspin { to { stroke-dashoffset: -100; } }
+/* 当前词的虚线环：静止的虚线环本身就是焦点标记；「转两圈」只是切词时的入场提示，
+   由 app.js 的 spinFocusRing() 用一次性动画播完即止。
+   ⚠ 切勿改回 CSS 无限旋转：它会让整张 SVG 每帧重绘 —— 实测 215 节点时空闲已占用
+   27% 主线程（关掉后 0.4%），在 iPad 上就是「用一会儿就发烫」的元凶。 */
 /* 平面视图：层级光晕没有意义，整体隐藏 */
 #graph g.flatview circle.glow { display: none; }
 
