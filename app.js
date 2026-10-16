@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v44";
+const APP_VERSION = "v45";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -1857,10 +1857,17 @@ function paraForms(w) {
    目标词必须排在词头前面注册 —— 否则词头的变形会把派生目标词吃掉
    （join 的 -er 变形 = joiner、receive 的 -r = receiver、deposit 的 -ion = deposition）。 */
 function paraPlan(word, tw) {
+  const all = (tw || []).map(([w, t]) => ({ w, t })).concat([{ w: word, t: -1 }]);
   const map = new Map();
-  (tw || []).map(([w, t]) => ({ w, t }))
-    .concat([{ w: word, t: -1 }])
-    .forEach(m => paraForms(m.w).forEach(v => { if (!map.has(v)) map.set(v, m); }));
+  /* 两遍登记，顺序很关键：bet+er 会拼出 better、join+er 会拼出 joiner。
+     若让派生形先占坑，词头自己的原形就被别的词认领走了 —— 挖空时会把词头
+     当成 bet 挖掉，高亮也会把 better 标成 bet。所以先登记各词自己的拼写，
+     派生形只在没人认领时才占坑。 */
+  all.forEach(m => {
+    const k = m.w.toLowerCase();
+    if (!map.has(k)) map.set(k, m);
+  });
+  all.forEach(m => paraForms(m.w).forEach(v => { if (!map.has(v)) map.set(v, m); }));
   const keys = [...map.keys()].sort((a, b) => b.length - a.length).map(reEsc);
   return { map, re: new RegExp("\\b(" + keys.join("|") + ")\\b", "gi") };
 }
@@ -1897,6 +1904,9 @@ function refillPara() { if (paraWant !== null && paraWant === current) renderPar
 function renderPara(i) {
   const blk = $("bPara");
   if (!blk) return;
+  /* 面板此刻显示的是词表外的词（内联卡片）：段落只属于词表内的词，一律不画。
+     否则 needNet 的晚到回调会把上一个词的段落重新画到这张卡片上。 */
+  if (extraCurrent) { blk.style.display = "none"; paraWant = null; return; }
   paraWant = i;
   stopParaRead();                       /* 换词就停掉上一段的连读 */
   const word = D.words[i], item = paraOf(word);
