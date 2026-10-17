@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v63";
+const APP_VERSION = "v64";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
