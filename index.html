@@ -66,7 +66,7 @@
   </div>
 
   <div class="stats" id="stats"></div>
-  <button id="verPill" class="verpill" title="当前版本 · 点一下检查更新">v55</button>
+  <button id="verPill" class="verpill" title="当前版本 · 点一下检查更新">v56</button>
 </header>
 
 <main>
@@ -77,12 +77,11 @@
       <button id="clearBtn" class="btn" title="清空画布">✕ 清空</button>
       <span id="trail" class="trail"></span>
     </div>
-    <svg id="graph"><defs>
-      <filter id="fwGlow" x="-30%" y="-30%" width="160%" height="160%">
-        <feGaussianBlur stdDeviation="1.4" result="blur"/>
-        <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-      </filter>
-    </defs></svg>
+    <!-- 渐变背景单独成一层：它永远不变，独立成层后词网每帧重绘时不必连它一起重新光栅化。
+         这里曾经还有一个 <filter id="fwGlow">（1.4px 高斯光晕）挂在整组连线上：
+         SVG 滤镜每帧都要把整组内容渲进离屏画布再模糊合成，实测占掉一帧的 22%，而视觉上几乎看不出区别。已移除。 -->
+    <div class="graphbg" aria-hidden="true"></div>
+    <svg id="graph"><defs></defs></svg>
     <div id="legend" class="legend lgbox"></div>
     <!-- 视角：0° = 平面俯视，越大越立体 -->
     <div class="tiltbox">

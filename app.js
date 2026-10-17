@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v55";
+const APP_VERSION = "v56";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -558,7 +558,9 @@ const g = svg.append("g");
 const gGrid = g.append("g").attr("class", "grid");
 const gStalks = g.append("g").attr("class", "stalks");
 const gLinks = g.append("g");
-gLinks.attr("filter", "url(#fwGlow)");
+/* 这里曾经给整组连线挂 SVG 滤镜（fwGlow，1.4px 高斯光晕）：
+   滤镜会把整组内容渲进离屏画布再模糊合成，每帧重绘都重跑一遍 ——
+   实测占掉一帧的 22%（dsf=2），视觉上却几乎看不出差别。已移除，别再加回来。 */
 /* 路径模式：每跳连线中点的关系名标签（普通模式为空） */
 const gEdge = g.append("g").attr("class", "edgelbls");
 const gNodes = g.append("g");
@@ -664,6 +666,13 @@ function radius(d) {
   return 5.5 + (10 - d.band) * 0.75 + (d.id === "w:" + current ? 3 : 0);
 }
 
+/* 收敛速度随规模自适应。
+   词网小的时候每帧很便宜，让它慢慢铺开最好看；词网一大（实测 200 节点、dsf=2 时
+   单帧全图重绘 59.5ms）不但每帧贵，节点多到谁的布局都会揉成一团，慢慢铺开既不美
+   又纯粹在烧电 —— 于是提前收敛，把可见帧数砍掉一半。
+   d3 默认 alphaDecay = 0.0228（≈300 步），这里按规模给 0.032 / 0.045（≈210 / 150 步）。 */
+function simDecay(n) { return n <= 60 ? 0.0228 : n <= 120 ? 0.032 : 0.045; }
+
 function startSim() {
   if (sim) sim.stop();
   sim = d3.forceSimulation(nodes)
@@ -672,8 +681,10 @@ function startSim() {
     .force("charge", d3.forceManyBody().strength(-300))
     .force("collide", d3.forceCollide().radius(d => radius(d) + 5).iterations(1))
     .force("center", d3.forceCenter(width() / 2, height() / 2))
-    .alpha(1).restart();
-  draw();
+    .alphaDecay(simDecay(nodes.length))
+    .alpha(1);
+  draw();                 /* 建好选择集（draw 里会挂上 tick / end 监听） */
+  sim.restart();
 }
 
 function prune() {
@@ -1167,7 +1178,13 @@ function paint() {
    切词时让当前词的虚线环转两圈（约 1.6 秒）就停。用一次性动画，不用 CSS 无限动画：
    无限动画会让整张 SVG 每帧重绘，词网一大就持续吃满 CPU —— 实测 215 个节点的
    空闲状态占用 27% 主线程（同一状态关掉这个动画立刻降到 0.4%），iPad 上就是
-   「用一会儿就发烫」。设备开了「减弱动态效果」时干脆不转。 */
+   「用一会儿就发烫」。设备开了「减弱动态效果」时干脆不转。
+
+   ⚠ 即便是「只转两圈」，代价也是**每次切词 96 帧整图重绘**（strokeDashoffset 是
+   SVG 绘制属性，改它就必须重画，合成器帮不上忙）。小词网上这很便宜，大词网上
+   等于每点一个词就满负荷好几秒。所以按规模上闸：节点数超过 RING_SPIN_MAXN 就不转
+   —— 静止的虚线环本身已经把焦点标的清清楚楚，转两圈只是锦上添花。 */
+const RING_SPIN_MAXN = 80;
 let ringAnim = null;
 /* 实时读「减弱动态效果」偏好，而不是启动时缓存一次：用户中途改设置也立刻生效 */
 function prefersReducedMotion() {
@@ -1176,6 +1193,7 @@ function prefersReducedMotion() {
 function spinFocusRing(sel) {
   if (ringAnim) { try { ringAnim.cancel(); } catch (e) {} ringAnim = null; }
   if (prefersReducedMotion() || !sel) return;
+  if (nodes.length > RING_SPIN_MAXN) return;
   let el = null;
   sel.each(function (d) { if (d.id === "w:" + current) el = this; });
   /* 注意 el 才是 DOM 元素：sel 是 d3 选择集，它上面没有 .animate */
@@ -1190,7 +1208,7 @@ function spinFocusRing(sel) {
 
 /* ---- 力导向的帧节流 ----
    每帧 paint() 要重写 200 多个节点、400 多条连线和全部标签的属性，
-   而一次「展开」要让模拟连跑约 300 帧。隔帧画一次视觉上几乎无差别，
+   而一次「展开」要让模拟连跑上百帧。隔帧画一次视觉上几乎无差别，
    交互期间的 CPU 直接减半；结束那一帧补画一次，保证最终位置准确。 */
 let tickOdd = false;
 function simTick() { tickOdd = !tickOdd; if (tickOdd) paint(); }
@@ -4902,5 +4920,14 @@ if (bootSeed === null) {
     partFailed(() => { if (bootSeed !== null) go(bootSeed); }, "起始词所在词层的数据没载入成功，点重试或直接选别的词");
   });
 }
+
+/* ---------- 测试钩子 ----------
+   app.js 是 IIFE，外面的无头回归脚本摸不到内部状态。
+   这里只暴露「省电绘制」相关的几个只读值，给 _shot_motion.js 断言用。 */
+window.COCA_PERF = {
+  ringMaxN: () => RING_SPIN_MAXN,                    /* 焦点环还转的上限节点数 */
+  ringAnimating: () => !!ringAnim,                   /* 焦点环是否正在转 */
+  simDecay: () => (sim ? sim.alphaDecay() : null),   /* 当前力导向的收敛速度 */
+};
 
 })();

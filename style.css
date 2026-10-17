@@ -96,12 +96,19 @@ main { flex: 1; display: flex; min-height: 0; }
 .trail span.sep { color: #cbd5e1; }
 .hint { font-size: 11px; color: #94a3b8; }
 
-#graph {
-  width: 100%; height: 100%; display: block; cursor: grab;
+/* 渐变底单独一层（.graphbg）。
+   原来它挂在 #graph 上，于是被画进 SVG 自己的图层：词网每帧重绘都会连这张
+   大范围渐变一起重新光栅化。挪出来 + 提成独立合成图层后，它原地缓存不再重画。 */
+.graphbg {
+  position: absolute; inset: 0; z-index: -1; pointer-events: none;
   /* 天光式背景：顶部一层柔光 + 自上而下的微弱纵深，比平铺一色更有空间感 */
   background:
     radial-gradient(1100px 540px at 50% 30%, rgba(255,255,255,.92), rgba(255,255,255,0) 72%),
     linear-gradient(180deg, #fbfdff 0%, #f3f7fc 58%, #edf2f9 100%);
+  will-change: transform;
+}
+#graph {
+  width: 100%; height: 100%; display: block; cursor: grab;
 }
 #graph:active { cursor: grabbing; }
 
@@ -121,7 +128,7 @@ main { flex: 1; display: flex; min-height: 0; }
    由 app.js 的 spinFocusRing() 用一次性动画播完即止。
    ⚠ 切勿改回 CSS 无限旋转：它会让整张 SVG 每帧重绘 —— 实测 215 节点时空闲已占用
    27% 主线程（关掉后 0.4%），在 iPad 上就是「用一会儿就发烫」的元凶。 */
-/* 平面视图：层级光晕没有意义，整体隐藏 */
+  /* 平面视图：层级光晕没有意义，整体隐藏 */
 #graph g.flatview circle.glow { display: none; }
 
 /* 图例区：左下角常驻的「词关系」卡片（可点开关）。
@@ -138,7 +145,9 @@ main { flex: 1; display: flex; min-height: 0; }
   background: rgba(255,255,255,.94); border: 1px solid var(--border);
   border-radius: 11px; padding: 8px 11px; display: flex; flex-direction: column; gap: 4px;
   box-shadow: 0 6px 22px rgba(15,23,42,.10);
-  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  /* 这里曾有一层 backdrop-filter: blur(6px)。底已经是 94% 不透明的白，
+     模糊几乎看不出来，代价却极高：卡片悬在词网上方，词网每动一帧，
+     它就要把背后重新读一遍再模糊一遍（实测占一帧的 29%）。已移除。 */
 }
 /* 标题行 + 收起/展开按钮 */
 .lgbox .lghd {
@@ -208,7 +217,7 @@ main { flex: 1; display: flex; min-height: 0; }
   background: rgba(255,255,255,.98); border: 1px solid var(--border);
   border-radius: 11px; padding: 8px 11px; display: flex; flex-direction: column; gap: 4px;
   box-shadow: 0 12px 34px rgba(15,23,42,.16);
-  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  /* 同 .lgcard：底已是 98% 不透明的白，backdrop-filter 只烧电不显效果，已移除 */
 }
 .helppop { animation: hpop .14s ease-out; }
 @keyframes hpop { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
@@ -296,13 +305,26 @@ main { flex: 1; display: flex; min-height: 0; }
   width: 32px; height: 32px; border-radius: 50%;
   border: 1.5px solid #dbeafe; background: #eff6ff; color: #2563eb;
   cursor: pointer; transition: background .15s, transform .1s; flex: none;
+  position: relative;
 }
 .speakbtn:hover { background: #dbeafe; }
 .speakbtn:active { transform: scale(.9); }
-.speakbtn.playing { animation: pulse .8s ease infinite; }
-@keyframes pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, .35); }
-  50% { box-shadow: 0 0 0 7px rgba(37, 99, 235, 0); }
+.speakbtn.playing,
+.colb.playing { animation: none; }
+/* 「正在播放」的呼吸环：用 ::after + transform/opacity 画，
+   这两样能交给合成器，不占主线程也不重新光栅化。
+   原来动画的是 box-shadow —— 它无法合成，播放期间每帧都要重绘，
+   等于一边放音一边白烧 CPU。 */
+.speakbtn.playing::after,
+.colb.playing::after {
+  content: ""; position: absolute; inset: -1px; border-radius: inherit;
+  border: 2px solid rgba(37, 99, 235, .55); pointer-events: none;
+  animation: pulseRing .9s ease-out infinite;
+  will-change: transform, opacity;
+}
+@keyframes pulseRing {
+  from { transform: scale(.86); opacity: .8; }
+  to   { transform: scale(1.55); opacity: 0; }
 }
 .dmeta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0 14px; }
 .phon { color: var(--accent); font-size: 15px; }
@@ -442,7 +464,7 @@ main { flex: 1; display: flex; min-height: 0; }
   padding: 4px 9px; font-size: 13px; cursor: pointer; color: #1f2937;
 }
 .colb:hover { border-color: var(--accent); background: var(--accent-soft); }
-.colb.playing { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); animation: pulse .8s ease infinite; }
+.colb.playing { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 .colb i { font-style: normal; font-size: 10.5px; color: #94a3b8; }
 
 /* ---- progress map modal ---- */
