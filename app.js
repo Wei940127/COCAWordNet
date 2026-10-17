@@ -4,7 +4,7 @@
 
 /* 应用版本号：显示在界面右上角，也是「是否已更新」的判据。
    改动 app.js / index.html / style.css 时 +1，并同步把 sw.js 里的 CACHE +1。 */
-const APP_VERSION = "v58";
+const APP_VERSION = "v59";
 window.APP_VERSION = APP_VERSION;
 
 const D = window.APP_DATA;
@@ -1830,6 +1830,7 @@ function renderExtraPanel(node) {
   $("dPhon").textContent = ph ? "/" + ph + "/" : "无音标 · 点 🔊 听发音";
   $("dPhon").classList.toggle("nophon", !ph);
   $("dBand").textContent = "词表外关联词";
+  if ($("dAwl")) $("dAwl").classList.add("hidden");
   $("dTags").innerHTML = "";
   document.querySelectorAll(".mbtn").forEach(b => b.classList.remove("on"));
   $("masteryRow").style.display = "none";
@@ -2500,6 +2501,7 @@ function showPartPending(i) {
   if (!panelPending("")) return;
   $("dWord").textContent = D.words[i];
   $("dBand").textContent = BAND_NAMES[D.band[i]] + " 词层 · 高频第 " + BAND_RANGE[D.band[i]] + " 词";
+  if ($("dAwl")) $("dAwl").classList.add("hidden");
   $("masteryRow").style.display = "";
 }
 function clearPartPending() { /* 展开时本来就会重画面板，占位不用单独收拾 */ }
@@ -2551,6 +2553,14 @@ function renderPanel(i, extraNode) {
   $("dPhon").textContent = ph ? "/" + ph + "/" : "无音标";
   $("dPhon").classList.toggle("nophon", !ph);
   $("dBand").textContent = BAND_NAMES[D.band[i]] + " 词层 · 高频第 " + BAND_RANGE[D.band[i]] + " 词";
+  /* AWL 徽章：只有学术词表里的词才显示，点了打开它所在的 Sublist */
+  const _dAwl = $("dAwl");
+  if (_dAwl) {
+    const _sn = awlSublist(i);
+    _dAwl.textContent = _sn ? "AWL · S" + _sn : "";
+    _dAwl.dataset.n = _sn || "";
+    _dAwl.classList.toggle("hidden", !_sn);
+  }
   const tags = (D.tag[i] || "").split(" ").filter(Boolean);
   $("dTags").innerHTML = tags.map(t => "<i>" + t + "</i>").join("");
 
@@ -3048,6 +3058,7 @@ function renderStats() {
        <div><i>8</i>词卡里的「易混词」列出形近 / 音近的词，点「辨析」并排对比、还能做小测（快捷键 C）</div>
        <div><i>9</i>词卡里的「词根拆解」每一段都能点：一个词根串起一串同根词（-spect- → expect / inspect / respect），这是把散词连成串最快的一条路（快捷键 I）。在词根索引页点「🧭 开始串记」还能把 411 组词根当学习路径一组组过，评过的词写进和复习卡同一条记录</div>
        <div><i>10</i>词卡里的「段落记忆」把这个词网编成一段小情景文：带色的就是它的关系词，点句子朗读、点彩色词跳回词网，点「挖空练习」用词池把挖掉的词填回去（快捷键 T）。读完一段，这些词就活在同一个语境里了</div>
+       <div><i>11</i>顶栏「📚 AWL」是学术英语最常用的 570 个词（按 Sublist 1–10 由常用到少用分组），词卡上出现紫色「AWL · S3」徽章就说明这个词在表里，点它直接跳到那一组（快捷键 W）</div>
      </div>` +
     `<div class="hsec">发音</div>` +
     `<div class="hlist">
@@ -3079,6 +3090,7 @@ function renderStats() {
        <span><b>M</b>进度地图</span><span><b>L</b>单词列表</span><span><b>V</b>立体/平面</span>
        <span><b>P</b>发音</span><span><b>H</b>本说明</span><span><b>K</b>难词清单</span>
        <span><b>S</b>学习统计</span><span><b>C</b>易混词辨析</span><span><b>I</b>词根索引</span><span><b>T</b>段落挖空</span>
+       <span><b>W</b>AWL 学术词</span>
        <span><b>Z</b>复位视图</span><span><b>1–7</b>关系过滤</span><span><b>0</b>全部显示</span>
      </div>` +
     `</div>`;
@@ -3858,6 +3870,182 @@ window.COCA_ROOT = {
     return e ? e.words.map(i => D.words[i]) : null;
   },
   state: () => ({ total: rootList().length, expanded: Array.from(rootExpanded), focus: rootFocus })
+};
+
+/* ---------- Academic Word List（AWL，570 个学术高频词） ----------
+   只做「标记 + 索引」，不复制任何词条数据：释义 / 关系 / 段落仍全部来自
+   data_b01..b10，所以 AWL 里的词点进去和普通词完全同一条链路。
+   词形按 AWL 原样保留（established / financial 这类派生形也在内），映射回本应用
+   的词头靠 D.idx → D.alias 两级回退（与 go() 同一口径）。
+   极少数不在 1 万词表里的（widespread / so-called）照样列出来，只是标「词表外」不可点。 */
+const AWL = (function () {
+  const src = (window.APP_AWL && window.APP_AWL.groups) || [];
+  const groups = src.map(g => ({
+    n: g.n,
+    items: g.words.map(raw => {
+      let i = D.idx[raw];
+      if (i === undefined) {
+        const head = D.alias[raw];
+        if (head !== undefined) i = D.idx[head];
+      }
+      return { raw: raw, i: i === undefined ? -1 : i };
+    }),
+  }));
+  const byIdx = new Map();               /* 词头下标 → 它所在的 Sublist（取最早出现的） */
+  groups.forEach(g => g.items.forEach(it => {
+    if (it.i >= 0 && !byIdx.has(it.i)) byIdx.set(it.i, g.n);
+  }));
+  let total = 0, inDict = 0;
+  groups.forEach(g => g.items.forEach(it => { total++; if (it.i >= 0) inDict++; }));
+  return { groups: groups, byIdx: byIdx, total: total, inDict: inDict };
+})();
+/* 词卡徽章用：当前词属不属于 AWL，属于哪一组 */
+function awlSublist(i) { return AWL.byIdx.get(i) || 0; }
+
+let awlExpanded = new Set([1]);         /* 默认展开 Sublist 1，其余收起，首屏不至于三百个词糊一屏 */
+let awlQuery = "", awlScope = "0", awlTodoOnly = false;
+const AWL_SCOPE = { "0": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "1": [1, 2], "2": [3, 4], "3": [5, 6], "4": [7, 8, 9, 10] };
+
+function awlMatches(it, q) {
+  if (!q) return true;
+  if (it.raw.toLowerCase().indexOf(q) >= 0) return true;
+  if (it.i < 0) return false;
+  if (D.words[it.i].toLowerCase().indexOf(q) >= 0) return true;
+  return String(D.trans[it.i] || "").toLowerCase().slice(0, 160).indexOf(q) >= 0;
+}
+
+/* AWL 词条：显示本应用的词头（点进去就是这个词），提示里交代 AWL 原词形。
+   例：AWL 收 analysis，本应用词头是 analyse —— 不说明会让人以为点错了。 */
+function awlChip(it) {
+  const i = it.i, w = D.words[i], zh = zhBrief(i, 16);
+  const tip = (it.raw !== w ? it.raw + " → 本应用词头 " + w : w) + " · " +
+    BAND_NAMES[D.band[i]] + " 词层（第 " + BAND_RANGE[D.band[i]] + " 词）· " +
+    zhBrief(i, 90) + " · 点击跳到词网并发音";
+  return '<span class="lw s' + statusOf(i) + (i === current ? " on" : "") + '" data-i="' + i +
+    '" title="' + esc(tip) + '"><b>' + esc(w) + "</b>" +
+    (zh ? "<i>" + esc(zh) + "</i>" : "") + "</span>";
+}
+
+function renderAwl() {
+  if (!$("awlBody")) return;
+  const q = awlQuery.trim().toLowerCase();
+  const scope = AWL_SCOPE[awlScope] || AWL_SCOPE["0"];
+  const gs = AWL.groups.filter(g => scope.indexOf(g.n) >= 0);
+  let shownItems = 0, shownDone = 0, lists = 0;
+  const html = gs.map(g => {
+    const items = g.items.filter(it => {
+      if (!awlMatches(it, q)) return false;
+      if (awlTodoOnly && it.i >= 0 && statusOf(it.i) === 2) return false;
+      return true;
+    });
+    if (!items.length) return "";
+    lists++;
+    const done = items.filter(it => it.i >= 0 && statusOf(it.i) === 2).length;
+    shownItems += items.length; shownDone += done;
+    const open = awlExpanded.has(g.n) || (!!q && items.length <= 80);
+    const chips = items.map(it => it.i >= 0
+      ? awlChip(it)
+      : '<span class="lw off" title="' + esc(it.raw) + ' 不在本应用的 1 万词表里">' +
+        "<b>" + esc(it.raw) + "</b><i>词表外</i></span>").join("");
+    return '<div class="rgroup' + (open ? " open" : "") + '" data-n="' + g.n + '">' +
+      '<div class="rhead" role="button" tabindex="0" title="展开 / 收起这一组">' +
+        '<span class="morph"><span class="seg">Sublist ' + g.n + "</span></span>" +
+        '<span class="rcount">' + items.length + " 词</span>" +
+        (done ? '<span class="awldone">已掌握 ' + done + "</span>" : "") +
+        '<span class="rarrow">' + (open ? "▾" : "▸") + "</span>" +
+      "</div>" +
+      (open ? '<div class="rwords">' + chips + "</div>" : "") +
+      "</div>";
+  }).join("");
+
+  $("awlSub").textContent = "共 " + AWL.total + " 词 · 词库里找到 " + AWL.inDict +
+    " 个 · 当前显示 " + shownItems + " 个" + (awlTodoOnly ? "（未掌握）" : "");
+  $("awlBody").innerHTML = lists
+    ? html
+    : '<div class="rempty">没有符合条件的词' + (q ? "（筛选：" + esc(q) + "）" : "") + "</div>";
+
+  const btn = $("awlToggleAll");
+  if (btn) {
+    btn.disabled = !lists;
+    const anyOpen = gs.some(g => awlExpanded.has(g.n));
+    btn.textContent = anyOpen ? "全部收起" : "全部展开";
+  }
+}
+
+/* 打开 AWL 词表。带 n 时定位到那一组（从词卡徽章点进来） */
+function openAwl(n) {
+  if (!$("awlModal")) return;
+  if (n) { awlExpanded.add(n); awlScope = "0"; $("awlSeg").querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.f === "0")); }
+  $("awlModal").classList.remove("hidden");
+  renderAwl();
+  if (n) requestAnimationFrame(() => {
+    const el = $("awlBody").querySelector('.rgroup[data-n="' + n + '"]');
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: "center" });
+  });
+}
+function closeAwl() { if ($("awlModal")) $("awlModal").classList.add("hidden"); }
+
+if ($("awlBtn")) $("awlBtn").onclick = () => openAwl();
+if ($("awlClose")) $("awlClose").onclick = closeAwl;
+if ($("awlModal")) $("awlModal").addEventListener("click", e => {
+  if (e.target === $("awlModal")) closeAwl();
+});
+if ($("awlFilter")) $("awlFilter").addEventListener("input", e => { awlQuery = e.target.value; renderAwl(); });
+if ($("awlSeg")) $("awlSeg").addEventListener("click", e => {
+  const b = e.target.closest("button[data-f]"); if (!b) return;
+  awlScope = b.dataset.f;
+  $("awlSeg").querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b));
+  renderAwl();
+});
+if ($("awlTodo")) $("awlTodo").addEventListener("change", e => { awlTodoOnly = e.target.checked; renderAwl(); });
+if ($("awlToggleAll")) $("awlToggleAll").onclick = () => {
+  const anyOpen = AWL.groups.some(g => awlExpanded.has(g.n));
+  awlExpanded = anyOpen ? new Set() : new Set(AWL.groups.map(g => g.n));
+  renderAwl();
+};
+if ($("awlBody")) $("awlBody").addEventListener("click", e => {
+  const chip = e.target.closest(".lw");
+  if (chip) {
+    if (chip.classList.contains("off")) return;      /* 词表外的词只展示 */
+    const i = +chip.dataset.i;
+    closeAwl();
+    go(i);
+    speak(D.words[i]);
+    return;
+  }
+  const head = e.target.closest(".rhead");
+  if (head) {
+    const g = head.parentElement, n = +g.dataset.n;
+    if (awlExpanded.has(n)) awlExpanded.delete(n); else awlExpanded.add(n);
+    renderAwl();
+  }
+});
+if ($("awlBody")) $("awlBody").addEventListener("keydown", e => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const head = e.target.closest(".rhead"); if (!head) return;
+  e.preventDefault();
+  const n = +head.parentElement.dataset.n;
+  if (awlExpanded.has(n)) awlExpanded.delete(n); else awlExpanded.add(n);
+  renderAwl();
+});
+/* 词卡上的 AWL 徽章：点了打开对应 Sublist */
+if ($("dAwl")) {
+  const openFromChip = () => { const n = +$("dAwl").dataset.n; if (n) openAwl(n); };
+  $("dAwl").addEventListener("click", openFromChip);
+  $("dAwl").addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openFromChip(); } });
+}
+
+/* 供自动化测试/排查用 */
+window.COCA_AWL = {
+  groups: () => AWL.groups.map(g => ({ n: g.n, n_words: g.items.length,
+    inDict: g.items.filter(it => it.i >= 0).length,
+    missing: g.items.filter(it => it.i < 0).map(it => it.raw) })),
+  sub: (w) => { let i = D.idx[w]; if (i === undefined) { const h = D.alias[w]; if (h !== undefined) i = D.idx[h]; }
+    return i === undefined ? 0 : awlSublist(i); },
+  total: () => AWL.total,
+  inDict: () => AWL.inDict,
+  state: () => ({ expanded: Array.from(awlExpanded), scope: awlScope, query: awlQuery, todo: awlTodoOnly,
+    open: $("awlModal") ? !$("awlModal").classList.contains("hidden") : false }),
 };
 
 /* ---------- 词根串记（把词根索引当学习路径，一组一组过） ----------
@@ -4856,6 +5044,11 @@ document.addEventListener("keydown", e => {
     if ($("rootModal").classList.contains("hidden")) openRoot();
     else $("rootModal").classList.add("hidden");
   }
+  /* AWL 学术词表：W 开关 */
+  if (e.key === "w" || e.key === "W") {
+    if ($("awlModal").classList.contains("hidden")) openAwl();
+    else closeAwl();
+  }
   /* 易混词辨析：C 开关（当前词的形近 / 音近对比） */
   if (e.key === "c" || e.key === "C") {
     if ($("confModal").classList.contains("hidden")) openConfuseCurrent(); else closeConfuse();
@@ -4871,6 +5064,7 @@ document.addEventListener("keydown", e => {
     if (window.closeHelp) window.closeHelp();
     if (!$("hardModal").classList.contains("hidden")) $("hardModal").classList.add("hidden");
     if (!$("rootModal").classList.contains("hidden")) $("rootModal").classList.add("hidden");
+    if (!$("awlModal").classList.contains("hidden")) closeAwl();
     if (!$("statModal").classList.contains("hidden")) closeStat();
     if (!$("confModal").classList.contains("hidden")) closeConfuse();
   }

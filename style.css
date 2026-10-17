@@ -332,6 +332,19 @@ main { flex: 1; display: flex; min-height: 0; }
   background: #eef2ff; color: #4338ca; border-radius: 20px;
   padding: 2px 10px; font-size: 11.5px;
 }
+/* AWL 学术词徽章：可点，点了打开 AWL 词表并定位到这一组 */
+.chip.awl {
+  background: #f5f3ff; color: #6d28d9; border: 1px solid #ddd6fe;
+  cursor: pointer; font-weight: 500;
+}
+.chip.awl:hover { background: #ede9fe; }
+.chip.awl:focus-visible { outline: 2px solid #a78bfa; outline-offset: 2px; }
+/* AWL 词表：复用词根页的分组骨架 */
+#awlModal .rgroup { background: #fff; border: 1px solid #eef2f7; border-left: 3px solid #ddd6fe; border-radius: 9px; }
+#awlModal .rgroup.open { background: #fcfbff; }
+#awlModal #awlBody { display: flex; flex-direction: column; gap: 6px; }
+#awlModal .rhead .seg { background: #f5f3ff; color: #5b21b6; border: 1px solid #ddd6fe; }
+#awlModal .awldone { font-size: 11.5px; color: #047857; }
 .tags { display: flex; gap: 4px; flex-wrap: wrap; }
 .tags i {
   font-style: normal; font-size: 10.5px; background: #f1f5f9; color: #475569;

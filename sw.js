@@ -8,7 +8,7 @@
    Bump CACHE whenever app files or data files change, so clients pick up the new version. */
 "use strict";
 
-const CACHE = "cocawn-v58";
+const CACHE = "cocawn-v59";
 
 /* Small app shell — must all fit in the install step.
    data_core.js（骨架：词表/词层/下标/别名，约 200KB gzip）是启动必需，放这里预缓存；
@@ -22,6 +22,7 @@ const SHELL = [
   "./style.css",
   "./d3.min.js",
   "./data_core.js",
+  "./data_awl.js",
   "./manifest.webmanifest",
   "./icon.png",
   "./icon-192.png",

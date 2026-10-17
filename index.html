@@ -58,6 +58,7 @@
     <button id="mapBtn" class="btn" title="按词层查看学习进度（快捷键 M）">▦ 进度地图</button>
     <button id="listBtn" class="btn" title="查看当前词层的全部单词（快捷键 L）">☰ 单词列表</button>
     <button id="rootBtn" class="btn" title="词根/词缀索引：一个词根串起一串同根词（快捷键 I）">🧩 词根</button>
+    <button id="awlBtn" class="btn" title="Academic Word List：570 个学术高频词，按 Sublist 1–10 分组（快捷键 W）">📚 AWL</button>
     <button id="nextBtn" class="btn primary" title="随机跳到下一个未掌握的词（快捷键 N）">下一个词 ▸</button>
     <button id="reviewBtn" class="btn" title="复习队列（快捷键 R）">🔁 复习</button>
     <button id="hardBtn" class="btn" title="难词清单：复习中老是记不住的词（快捷键 K）">⚠ 难词</button>
@@ -66,7 +67,7 @@
   </div>
 
   <div class="stats" id="stats"></div>
-  <button id="verPill" class="verpill" title="当前版本 · 点一下检查更新">v58</button>
+  <button id="verPill" class="verpill" title="当前版本 · 点一下检查更新">v59</button>
 </header>
 
 <main>
@@ -130,6 +131,7 @@
         <div class="dmeta">
           <span id="dPhon" class="phon" title="点击播放美式发音"></span>
           <span id="dBand" class="chip"></span>
+          <span id="dAwl" class="chip awl hidden" role="button" tabindex="0" title="Academic Word List 学术词 · 点击查看这一组"></span>
           <span id="dTags" class="tags"></span>
         </div>
         <!-- 词性导航：多义词按 名/动/形/副 一键切换，中文/英文释义联动过滤 -->
@@ -263,6 +265,33 @@
       <span class="mio">
         <button id="rootToggleAll" class="btn mini" title="展开 / 收起当前筛选下的全部分组">全部展开</button>
         <button id="rootStudy" class="btn mini primary" title="按词根把同根词一组一组过一遍">🧭 开始串记</button>
+      </span>
+    </div>
+  </div>
+</div>
+
+<div id="awlModal" class="modal hidden">
+  <div class="modalCard wide">
+    <div class="mhead">
+      <b>Academic Word List <small id="awlSub"></small></b>
+      <button id="awlClose" class="mclose" title="关闭（Esc）">✕</button>
+    </div>
+    <div class="lbar">
+      <input id="awlFilter" type="text" placeholder="筛选单词或中文释义（如 analysis / 分析）…" autocomplete="off" spellcheck="false">
+      <div class="lseg" id="awlSeg">
+        <button data-f="0" class="on">全部</button>
+        <button data-f="1">S1–2</button>
+        <button data-f="2">S3–4</button>
+        <button data-f="3">S5–6</button>
+        <button data-f="4">S7–10</button>
+      </div>
+      <label class="rcheck"><input type="checkbox" id="awlTodo"> 只看没掌握的</label>
+    </div>
+    <div id="awlBody" class="rbody"></div>
+    <div class="mfoot">
+      <span>AWL 是学术英语最常见的 570 个词族（Coxhead），按 Sublist 1–10 由常用到少用排列 · 点词跳到词网并发音 · 点组头展开 / 收起</span>
+      <span class="mio">
+        <button id="awlToggleAll" class="btn mini" title="展开 / 收起当前筛选下的全部分组">全部展开</button>
       </span>
     </div>
   </div>
@@ -451,6 +480,7 @@
 
 <script src="d3.min.js"></script>
 <script src="data_core.js" onerror="window.__DATA_FAIL=1"></script>
+<script src="data_awl.js"></script>
 <script src="app.js"></script>
 <script>
 /* PWA：离线缓存 + 自动更新（用 file:// 直接打开时跳过）
