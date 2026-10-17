@@ -395,6 +395,7 @@ main { flex: 1; display: flex; min-height: 0; }
   background: #f8fafc; border-radius: 0 8px 8px 0;
   padding: 8px 11px 8px 10px; cursor: pointer;
   transition: background .12s, border-color .12s;
+  position: relative; /* 呼吸环 ::after 以它定位 */
 }
 .exlist .exrow:hover { background: #eef2ff; }
 .exlist .exrow:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
@@ -462,6 +463,7 @@ main { flex: 1; display: flex; min-height: 0; }
   display: inline-flex; align-items: baseline; gap: 6px;
   border: 1px solid var(--border); background: #fbfcfe; border-radius: 6px;
   padding: 4px 9px; font-size: 13px; cursor: pointer; color: #1f2937;
+  position: relative; /* 呼吸环 ::after 以它定位，缺了会贴到整个面板（v56 踩过） */
 }
 .colb:hover { border-color: var(--accent); background: var(--accent-soft); }
 .colb.playing { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
@@ -1099,6 +1101,7 @@ main { padding-bottom: env(safe-area-inset-bottom); }
 .ctab .cspeak {
   border: 1px solid var(--border); background: #fbfcfe; border-radius: 7px;
   padding: 3px 7px; cursor: pointer; font-size: 12px;
+  position: relative; /* 呼吸环 ::after 以它定位 */
 }
 .ctab .cspeak:hover { border-color: var(--accent); background: var(--accent-soft); }
 
@@ -1134,7 +1137,7 @@ main { padding-bottom: env(safe-area-inset-bottom); }
 /* ---------- 段落记忆（v44）：一个词网编成一段话，读一遍 + 挖空回填 ----------
    目标词的着色沿用图例里的关系配色，只是换成可读性更好的深色版。 */
 .para .pen { margin: 0; font-size: 13.5px; line-height: 1.95; color: #1e293b; }
-.para .psent { cursor: pointer; border-radius: 4px; }
+.para .psent { cursor: pointer; border-radius: 4px; position: relative; /* 呼吸环 ::after 以它定位 */ }
 .para .psent:hover { background: #f1f5f9; }
 .para .psent:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
 .para .pw {
